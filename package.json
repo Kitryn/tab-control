@@ -5,7 +5,8 @@
   "description": "A shared vanilla JavaScript WebExtension for Firefox and Chromium browsers.",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

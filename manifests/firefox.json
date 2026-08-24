@@ -9,9 +9,9 @@
       "strict_min_version": "109.0"
     }
   },
-  "permissions": ["tabs"],
+  "permissions": ["tabs", "contextualIdentities", "cookies", "tabGroups"],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": ["inventory.js", "background.js"]
   },
   "action": {
     "default_title": "Tab Control",
