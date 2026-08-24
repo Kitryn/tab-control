@@ -1,0 +1,13 @@
+{
+  "name": "tab-control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A shared vanilla JavaScript WebExtension for Firefox and Chromium browsers.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

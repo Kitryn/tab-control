@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Control",
+  "version": "0.1.0",
+  "description": "Inspect and control browser tabs through an authorized local agent.",
+  "permissions": ["tabs"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Tab Control",
+    "default_popup": "dashboard.html"
+  }
+}
