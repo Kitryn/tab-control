@@ -5,7 +5,8 @@
   "description": "Inspect and control browser tabs through an authorized local agent.",
   "permissions": ["tabs", "tabGroups", "nativeMessaging"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "action": {
     "default_title": "Tab Control",

@@ -23,6 +23,9 @@ for (const browser of ["firefox", "chromium"]) {
   if (!manifest.action?.default_popup) {
     throw new Error(`${browser} manifest requires a dashboard popup`);
   }
+  if (manifest.background?.type !== "module") {
+    throw new Error(`${browser} background must be type module`);
+  }
 }
 
 console.log("Source and manifests are valid");

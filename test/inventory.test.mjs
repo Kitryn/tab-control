@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-await import("../src/inventory.js");
-const { createInventory } = globalThis.TabControlInventory;
+import { createInventory } from "../src/inventory.js";
 
 test("get returns normalized browser state", async () => {
   const api = mockApi();
@@ -70,7 +69,7 @@ test("negative successor IDs use null", async () => {
   assert.equal(result.windows[0].tabs[0].successorTabId, null);
 });
 
-test("request handler accepts get and rejects other methods", async () => {
+test("request handler accepts get and apply close", async () => {
   const api = mockApi();
   api.runtime = {
     onInstalled: event(),
@@ -83,24 +82,37 @@ test("request handler accepts get and rejects other methods", async () => {
   };
   api.extension.isAllowedIncognitoAccess = (callback) => callback(true);
   globalThis.chrome = api;
-  await import("../src/background.js");
+  const { handleRequest } = await import("../src/background.js");
 
-  const success = await globalThis.TabControl.handleRequest({
+  const success = await handleRequest({
     jsonrpc: "2.0",
     id: 9,
     method: "get",
     params: {}
   });
-  const failure = await globalThis.TabControl.handleRequest({
+  const failure = await handleRequest({
     jsonrpc: "2.0",
     id: 10,
-    method: "apply",
+    method: "nope",
     params: {}
+  });
+  const applied = await handleRequest({
+    jsonrpc: "2.0",
+    id: 11,
+    method: "apply",
+    params: {
+      revision: 1,
+      description: "Close the example tab",
+      actions: [{ type: "close", tabIds: [7] }]
+    }
   });
 
   assert.equal(success.id, 9);
   assert.equal(success.result.windows[0].id, 1);
   assert.equal(failure.error.code, -32601);
+  assert.equal(applied.result.changeId, "1");
+  assert.deepEqual(applied.result.actions, [{ index: 0, ok: true }]);
+  assert.deepEqual(api.tabs.removed, [7]);
   delete globalThis.chrome;
 });
 
@@ -144,6 +156,10 @@ function mockApi() {
   }];
   const api = {
     tabs: {
+      removed: [],
+      remove: async (tabIds) => {
+        api.tabs.removed.push(...tabIds);
+      },
       onCreated: event(), onUpdated: event(), onMoved: event(),
       onAttached: event(), onDetached: event(), onActivated: event(),
       onHighlighted: event(), onRemoved: event(), onReplaced: event()

@@ -1,40 +1,63 @@
-if (!globalThis.TabControlInventory && globalThis.importScripts) {
-  globalThis.importScripts("inventory.js");
-}
+import { createInventory } from "./inventory.js";
+import { createChange } from "./change.js";
 
 const extensionApi = globalThis.browser ?? globalThis.chrome;
-const inventory = globalThis.TabControlInventory.createInventory(extensionApi);
+const inventory = createInventory(extensionApi);
+const change = createChange(extensionApi, inventory);
 
-globalThis.TabControl = {
-  async handleRequest(request) {
-    if (!request || request.jsonrpc !== "2.0" || request.method !== "get") {
-      return errorResponse(request?.id ?? null, -32601, "Unknown method");
-    }
+export async function handleRequest(request) {
+  if (!request || request.jsonrpc !== "2.0") {
+    return errorResponse(request?.id ?? null, -32600, "Invalid request");
+  }
 
+  if (request.method === "get") {
     if (request.params && Object.keys(request.params).length > 0) {
       return errorResponse(request.id, -32602, "Invalid parameters");
     }
-
+    await change.idle();
     try {
-      return {
-        jsonrpc: "2.0",
-        id: request.id,
-        result: await inventory.get()
-      };
+      return { jsonrpc: "2.0", id: request.id, result: await inventory.get() };
     } catch (error) {
       return errorResponse(request.id, -32603, error?.message ?? "Internal error");
     }
   }
-};
 
-function errorResponse(id, code, message) {
-  return { jsonrpc: "2.0", id, error: { code, message } };
+  if (request.method === "apply") {
+    const end = change.begin();
+    if (!end) {
+      return errorResponse(request.id, -32004, "Another change is in progress");
+    }
+    try {
+      const outcome = await change.apply(request.params);
+      if (outcome.error) {
+        return errorResponse(
+          request.id,
+          outcome.error.code,
+          outcome.error.message,
+          outcome.error.data
+        );
+      }
+      return { jsonrpc: "2.0", id: request.id, result: outcome.result };
+    } catch (error) {
+      return errorResponse(request.id, -32603, error?.message ?? "Internal error");
+    } finally {
+      end();
+    }
+  }
+
+  return errorResponse(request.id ?? null, -32601, "Unknown method");
+}
+
+function errorResponse(id, code, message, data) {
+  const error = { code, message };
+  if (data !== undefined) error.data = data;
+  return { jsonrpc: "2.0", id, error };
 }
 
 const nativePort = extensionApi.runtime.connectNative("com.tab_control.bridge");
 
 nativePort.onMessage.addListener(async (request) => {
-  nativePort.postMessage(await globalThis.TabControl.handleRequest(request));
+  nativePort.postMessage(await handleRequest(request));
 });
 
 nativePort.onDisconnect.addListener(() => {

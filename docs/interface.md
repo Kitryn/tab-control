@@ -326,6 +326,18 @@ to recreated tabs or windows.
 
 ## 7. Actions
 
+`move`, `order`, and `open` take `windowId`. A number is a window from the
+inventory (including windows earlier actions in this list already used).
+`null` means the window created by the nearest preceding `newWindow` in this
+`actions` list. `null` is not the focused window.
+
+If `windowId` is `null` and no `newWindow` precedes this action, validation
+fails. After a second `newWindow`, `null` binds to that later window. An
+earlier new window in the same list has no id the agent can name; a later
+`apply` after `get` can use the numeric id from `get`.
+
+`closeWindow` requires a numeric `windowId`. `null` is invalid.
+
 ### 7.1 `move`
 
 Move tabs to a window and index:
@@ -340,8 +352,13 @@ Move tabs to a window and index:
 ```
 
 The extension preserves the order in `tabIds`. An index of `-1` means the end
-of the destination window. Pinned tabs must stay before unpinned tabs. The
+of the destination window. `index` is the final index of the first moved tab
+in the destination window after the move. The agent does not compute
+pre-removal index arithmetic. Pinned tabs must stay before unpinned tabs. The
 extension rejects an index outside the permitted pinned or unpinned region.
+
+Use `move` when a subset of tabs should land at one place. Use `order` when
+one window's strip should become an exact list.
 
 ### 7.2 `order`
 
@@ -356,32 +373,10 @@ Set the complete tab order for one window:
 ```
 
 `tabIds` must contain each tab in the window exactly once. All pinned tabs must
-come before all unpinned tabs.
+come before all unpinned tabs. If the window's tab set changed since `get`,
+validation fails. The agent calls `get` and sends a new `order`.
 
-### 7.3 `relativeOrder`
-
-Replace the order between two stable anchors by sending the middle range:
-
-```json
-{
-  "type": "relativeOrder",
-  "windowId": 1,
-  "beforeTabId": 17,
-  "tabIds": [9, 24, 12],
-  "afterTabId": 31
-}
-```
-
-The tabs before `beforeTabId` and after `afterTabId` stay in place. The two
-anchor tabs also stay in place. `tabIds` must contain each tab that is currently
-between the anchors exactly once. The action changes the order of that middle
-range and preserves both outer ranges.
-
-Use `null` for `beforeTabId` to anchor the range at the start of the window. Use
-`null` for `afterTabId` to anchor it at the end. The pinned-tab ordering rule
-still applies.
-
-### 7.4 `update`
+### 7.3 `update`
 
 Update tab properties:
 
@@ -395,7 +390,7 @@ Update tab properties:
 
 The `update` action supports the `pinned` property.
 
-### 7.5 `group`
+### 7.4 `group`
 
 Create a group:
 
@@ -419,15 +414,19 @@ Move tabs into an existing group:
 }
 ```
 
-Use one group form in each request: `groupId` or the new group properties.
+Use one group form in each action: `groupId` or the new group properties.
 
 All tabs must be in one window. For an existing group, all tabs must be in the
 same window as the group.
 
+A create form returns `groupId` on that action result. Later actions in the
+same `apply` list cannot use that id. The agent calls `get`, then a later
+`apply` may send `groupId`.
+
 Browsers with tab group APIs execute this action. Other browser versions return
 an unsupported-operation error.
 
-### 7.6 `ungroup`
+### 7.5 `ungroup`
 
 Remove tabs from their groups:
 
@@ -438,7 +437,7 @@ Remove tabs from their groups:
 }
 ```
 
-### 7.7 `open`
+### 7.6 `open`
 
 Open inactive tabs and keep their target websites unloaded:
 
@@ -478,7 +477,7 @@ title for such a pending tab and sets `pendingOpen` to `true`. Other tabs return
 Firefox accepts `containerId`. Chromium accepts `null`. The `open` action
 accepts fully qualified HTTP or HTTPS URLs.
 
-### 7.8 `close`
+### 7.7 `close`
 
 Close tabs:
 
@@ -491,7 +490,7 @@ Close tabs:
 
 The recovery snapshot is the archive record.
 
-### 7.9 `newWindow`
+### 7.8 `newWindow`
 
 Create a normal window and move tabs into it:
 
@@ -503,12 +502,13 @@ Create a normal window and move tabs into it:
 }
 ```
 
-The action result contains the new window ID. A subsequent `apply` request can
-use this ID.
+The action result contains the new window ID. Later `move`, `order`, and
+`open` actions in this list target that window with `windowId: null`. They
+cannot name the new numeric id until a later `get`.
 
 The `newWindow` action accepts tabs from standard windows.
 
-### 7.10 `closeWindow`
+### 7.9 `closeWindow`
 
 Close a window and all its tabs:
 
@@ -518,6 +518,8 @@ Close a window and all its tabs:
   "windowId": 2
 }
 ```
+
+`windowId` must be a number from the inventory. It must not be `null`.
 
 ## 8. `undo`
 

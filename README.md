@@ -21,9 +21,8 @@ Load `dist/firefox` as a temporary add-on in Firefox. Load `dist/chromium` as an
 
 The source is shared. The build uses one browser-specific Manifest V3 file for each target.
 
-The JSON-RPC handler is available as
-`globalThis.TabControl.handleRequest(request)` and accepts `get` requests from
-the Native Messaging transport.
+The JSON-RPC handler is `handleRequest` in `src/background.js` and accepts
+`get` and `apply` (`close` only) from the Native Messaging transport.
 
 The CLI is a JSON-RPC transport shim:
 
