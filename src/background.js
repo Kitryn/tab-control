@@ -31,6 +31,17 @@ function errorResponse(id, code, message) {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
+const nativePort = extensionApi.runtime.connectNative("com.tab_control.bridge");
+
+nativePort.onMessage.addListener(async (request) => {
+  nativePort.postMessage(await globalThis.TabControl.handleRequest(request));
+});
+
+nativePort.onDisconnect.addListener(() => {
+  const error = extensionApi.runtime.lastError;
+  console.error(error?.message ?? "Tab Control native bridge disconnected");
+});
+
 extensionApi.runtime.onInstalled.addListener(() => {
   console.info("Tab Control installed");
 });

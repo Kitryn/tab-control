@@ -9,7 +9,7 @@
       "strict_min_version": "109.0"
     }
   },
-  "permissions": ["tabs", "contextualIdentities", "cookies", "tabGroups"],
+  "permissions": ["tabs", "contextualIdentities", "cookies", "tabGroups", "nativeMessaging"],
   "background": {
     "scripts": ["inventory.js", "background.js"]
   },

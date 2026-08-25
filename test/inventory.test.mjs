@@ -43,7 +43,7 @@ test("revision changes after a browser event", async () => {
   delete globalThis.browser;
 });
 
-test("unsupported browser fields use null", async () => {
+test("omitted browser fields use null", async () => {
   const api = mockApi();
   delete api.contextualIdentities;
   delete api.tabGroups;
@@ -61,9 +61,26 @@ test("unsupported browser fields use null", async () => {
   assert.deepEqual(result.groups, []);
 });
 
-test("request handler accepts only get", async () => {
+test("negative successor IDs use null", async () => {
   const api = mockApi();
-  api.runtime = { onInstalled: event() };
+  api.windows.value[0].tabs[0].successorTabId = -1;
+
+  const result = await createInventory(api).get();
+
+  assert.equal(result.windows[0].tabs[0].successorTabId, null);
+});
+
+test("request handler accepts get and rejects other methods", async () => {
+  const api = mockApi();
+  api.runtime = {
+    onInstalled: event(),
+    connectNative: () => ({
+      onMessage: event(),
+      onDisconnect: event(),
+      postMessage() {}
+    }),
+    lastError: null
+  };
   api.extension.isAllowedIncognitoAccess = (callback) => callback(true);
   globalThis.chrome = api;
   await import("../src/background.js");

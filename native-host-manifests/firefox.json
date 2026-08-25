@@ -1,0 +1,7 @@
+{
+  "name": "com.tab_control.bridge",
+  "description": "Tab Control native messaging bridge",
+  "path": "HOST_PATH",
+  "type": "stdio",
+  "allowed_extensions": ["tab-control@example.invalid"]
+}

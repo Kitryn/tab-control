@@ -11,19 +11,36 @@ for (const file of await readdir(source)) {
   await checkJavaScript(join(source, file));
 }
 
+await checkRust();
+
 for (const browser of ["firefox", "chromium"]) {
   const manifest = JSON.parse(
     await readFile(join(root, "manifests", `${browser}.json`), "utf8")
   );
   if (manifest.manifest_version !== 3) {
-    throw new Error(`${browser} manifest is not Manifest V3`);
+    throw new Error(`${browser} manifest requires Manifest V3`);
   }
   if (!manifest.action?.default_popup) {
-    throw new Error(`${browser} manifest has no dashboard popup`);
+    throw new Error(`${browser} manifest requires a dashboard popup`);
   }
 }
 
 console.log("Source and manifests are valid");
+
+function checkRust() {
+  return new Promise((resolveCheck, reject) => {
+    const child = spawn(
+      "cargo",
+      ["check", "--manifest-path", join(root, "native", "Cargo.toml")],
+      { stdio: "inherit", cwd: root }
+    );
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) resolveCheck();
+      else reject(new Error("Compile check failed for native crate"));
+    });
+  });
+}
 
 function checkJavaScript(file) {
   return new Promise((resolveCheck, reject) => {

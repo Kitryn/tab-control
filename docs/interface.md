@@ -7,7 +7,8 @@ agent reads browser state and sends primitive browser changes. The agent owns
 search, classification, duplicate detection, sorting decisions, grouping
 decisions, and summaries.
 
-The extension does not contain an orchestration engine.
+The agent owns orchestration. The extension supplies browser state and executes
+primitive browser changes.
 
 This interface targets current Firefox and Chromium-based browsers on Linux
 and macOS.
@@ -17,22 +18,45 @@ and macOS.
 The client has one command:
 
 ```sh
-node tabctl.js rpc
+tabctl rpc
 ```
 
 The command reads one JSON-RPC 2.0 request from standard input. It writes one
 JSON-RPC 2.0 response to standard output. It writes diagnostic messages to
-standard error.
+standard error. The request and the socket frame are JSON Lines: one JSON
+object, one line. Pretty-printed JSON is rejected.
 
 The command connects to the local native bridge through a Unix domain socket.
-The socket protocol and socket location are internal details. They are not
-part of this interface.
+The public interface starts at JSON-RPC input and ends at JSON-RPC output. The
+bridge owns the socket protocol and socket location.
 
-Version 1 does not support JSON-RPC notifications or batch requests.
+Each invocation accepts one JSON-RPC request and returns one JSON-RPC response.
+Each invocation is independent. The client does not hold a session or a
+browser lock across invocations. Occupancy is one in-flight change
+(`apply` or `undo`), not ownership of the browser.
+
+Multiple clients may call the interface at the same time.
+
+`get` never fails because another `get` is in progress.
+
+If `apply` or `undo` is in progress, `get` waits until that change
+finishes, then returns a consistent inventory. It does not return
+mid-change state.
+
+If `apply` or `undo` is already in progress, a second `apply` or `undo`
+fails immediately with `-32004`. The second change is not queued.
+
+If a change completes and a later `apply` or `undo` sends a stale
+revision, the method fails with `-32001`. The agent must call `get` and
+decide what to do.
+
+If the browser or bridge does not respond, the client fails and the
+bridge abandons that request so later clients are not blocked. A JSON-RPC
+error uses `-32000`.
 
 ## 3. Methods
 
-Version 1 has three methods:
+The interface has three methods:
 
 | Method | Purpose |
 | --- | --- |
@@ -148,27 +172,27 @@ access.
 
 `capturedAt` and `lastAccessed` are Unix times in milliseconds.
 
-`privateWindowsIncluded` is false when the browser does not give the extension
-access to private or incognito windows. In that case, the inventory is complete
-only for non-private windows.
+`privateWindowsIncluded: true` means that the inventory covers standard and
+private windows. `privateWindowsIncluded: false` means that the inventory covers
+standard windows.
 
-Browser tab, window, and group IDs are valid only in the current browser
-session. An agent must call `get` again after the browser restarts.
+Browser tab, window, and group IDs belong to the current browser session. An
+agent calls `get` again after the browser restarts.
 
-The extension returns `null` for an unsupported or unavailable field. For
-example, Chromium returns `null` for `container` and `successorTabId`.
+The extension returns `null` when the browser omits a field. For example,
+Chromium returns `null` for `container` and `successorTabId`.
 
 A container is a Firefox contextual identity. It gives a tab a separate cookie
-store, such as Personal, Work, or Banking. Chromium does not support Firefox
-containers.
+store, such as Personal, Work, or Banking. Chromium returns `null` for this
+Firefox-specific field.
 
 `lastAccessed` is the last time that the tab became active in its window.
 Current Firefox and Chromium versions expose this value.
 
-`openerTabId` identifies the tab that opened this tab. It is available only
-while the opener still exists. In Firefox, the opener must also be in the same
-window. `successorTabId` identifies the tab that Firefox selects after this tab
-closes. Chromium does not expose a successor tab ID.
+`openerTabId` identifies the tab that opened this tab. It remains available
+while the opener exists. Firefox also keeps the opener in the same window.
+`successorTabId` identifies the tab that Firefox selects after this tab closes.
+Chromium returns `null` for this Firefox-specific field.
 
 A group has this form:
 
@@ -185,6 +209,9 @@ A group has this form:
 The revision changes when the inventory changes. An agent uses the revision to
 prevent a change from using stale IDs or positions.
 
+Concurrent `get` requests succeed independently. A `get` that arrives
+while `apply` or `undo` is running waits for that change to finish.
+
 ## 6. `apply`
 
 `apply` checks the supplied revision and validates the complete action list. It
@@ -192,12 +219,14 @@ validates each action against the state that earlier actions will produce. If
 validation succeeds, it saves a recovery snapshot and runs the actions in array
 order. It applies the change immediately.
 
-The recovery snapshot stores the window and tab inventory and the metadata that
-the extension supports. It does not store page form data, page process state,
-or other content state.
+If another `apply` or `undo` is already in progress, this method fails
+immediately with `-32004`. It does not wait for the other change.
 
-The extension creates a change record only when execution can start. A failed
-revision check or validation does not create a change record.
+The recovery snapshot stores the window and tab inventory plus supported
+metadata. Tab recreation restores URLs and supported tab properties.
+
+The extension creates a change record after all validation succeeds and
+immediately before execution starts.
 
 ### Request
 
@@ -258,9 +287,9 @@ revision check or validation does not create a change record.
 
 ### Failed action and rollback
 
-If an action fails, the extension stops and does not run later actions. It then
-uses the saved snapshot to roll back all supported changes. Rollback is best
-effort because a browser cannot restore all closed-tab state.
+The first failed action ends forward execution. The extension then uses the
+saved snapshot to roll back all supported changes. Rollback recreates closed
+tabs from their URLs and supported metadata.
 
 ```json
 {
@@ -279,7 +308,7 @@ effort because a browser cannot restore all closed-tab state.
         "ok": false,
         "error": {
           "code": "TAB_NOT_FOUND",
-          "message": "Tab 24 does not exist"
+          "message": "Tab 24 is missing"
         }
       }
     ],
@@ -331,8 +360,7 @@ come before all unpinned tabs.
 
 ### 7.3 `relativeOrder`
 
-Replace the order between two stable anchors without sending the complete
-window order:
+Replace the order between two stable anchors by sending the middle range:
 
 ```json
 {
@@ -346,8 +374,8 @@ window order:
 
 The tabs before `beforeTabId` and after `afterTabId` stay in place. The two
 anchor tabs also stay in place. `tabIds` must contain each tab that is currently
-between the anchors exactly once. The action changes only the order of that
-middle range.
+between the anchors exactly once. The action changes the order of that middle
+range and preserves both outer ranges.
 
 Use `null` for `beforeTabId` to anchor the range at the start of the window. Use
 `null` for `afterTabId` to anchor it at the end. The pinned-tab ordering rule
@@ -365,7 +393,7 @@ Update tab properties:
 }
 ```
 
-Version 1 supports only `pinned`.
+The `update` action supports the `pinned` property.
 
 ### 7.5 `group`
 
@@ -391,14 +419,13 @@ Move tabs into an existing group:
 }
 ```
 
-A request must contain either `groupId` or the new group properties. It must not
-contain both forms.
+Use one group form in each request: `groupId` or the new group properties.
 
 All tabs must be in one window. For an existing group, all tabs must be in the
 same window as the group.
 
-The method returns an unsupported-operation error if the browser does not
-support tab groups.
+Browsers with tab group APIs execute this action. Other browser versions return
+an unsupported-operation error.
 
 ### 7.6 `ungroup`
 
@@ -413,7 +440,7 @@ Remove tabs from their groups:
 
 ### 7.7 `open`
 
-Open inactive tabs without loading the target websites:
+Open inactive tabs and keep their target websites unloaded:
 
 ```json
 {
@@ -439,17 +466,17 @@ Open inactive tabs without loading the target websites:
 }
 ```
 
-All new tabs start inactive and discarded. The target websites do not load
-until the user activates their tabs.
+All new tabs start inactive and discarded. The target website loads when the
+user activates its tab.
 
-Firefox supports direct creation of discarded tabs. Chromium does not. On
-Chromium, the extension creates and discards a small local placeholder tab. It
-stores the target URL and navigates to it when the user first activates the
-tab. `get` returns the target URL and title for such a pending tab and sets
-`pendingOpen` to `true`. Other tabs return `pendingOpen: false`.
+Firefox creates the target tab directly in a discarded state. Chromium creates
+and discards a small local placeholder tab, stores the target URL, and navigates
+to it when the user first activates the tab. `get` returns the target URL and
+title for such a pending tab and sets `pendingOpen` to `true`. Other tabs return
+`pendingOpen: false`.
 
-`containerId` is available only in Firefox. All tabs must have fully qualified
-HTTP or HTTPS URLs in version 1.
+Firefox accepts `containerId`. Chromium accepts `null`. The `open` action
+accepts fully qualified HTTP or HTTPS URLs.
 
 ### 7.8 `close`
 
@@ -462,7 +489,7 @@ Close tabs:
 }
 ```
 
-The recovery snapshot is the version 1 archive record.
+The recovery snapshot is the archive record.
 
 ### 7.9 `newWindow`
 
@@ -476,10 +503,10 @@ Create a normal window and move tabs into it:
 }
 ```
 
-The action result contains the new window ID. Later actions in the same request
-cannot refer to this ID.
+The action result contains the new window ID. A subsequent `apply` request can
+use this ID.
 
-Version 1 rejects private or incognito tabs in this action.
+The `newWindow` action accepts tabs from standard windows.
 
 ### 7.10 `closeWindow`
 
@@ -530,17 +557,19 @@ or agent changes.
 If the current revision differs from `revision`, the method fails with
 `-32001`. The agent must call `get` and decide what to do.
 
-Undo is best effort. Closed tabs and windows can require tab recreation. This
-can lose navigation history, form data, and other browser-session state. A
-warning explains each state that the extension could not restore exactly. For
-example:
+If another `apply` or `undo` is already in progress, this method fails
+immediately with `-32004`. It does not wait for the other change.
+
+Undo restores supported browser state. Closed tabs and windows can require tab
+recreation. Recreated tabs start with fresh navigation and content state. A
+warning explains each partial restoration. For example:
 
 ```json
 {
   "warnings": [
     {
       "code": "TAB_RECREATED",
-      "message": "Tab 24 was recreated without its navigation history"
+      "message": "Tab 24 was recreated with fresh navigation history"
     }
   ]
 }
@@ -564,7 +593,7 @@ The extension stores one changelog record with each recovery snapshot:
 ```
 
 The extension dashboard reads these records from extension storage. The public
-RPC interface does not expose a separate changelog method.
+RPC interface remains `get`, `apply`, and `undo`.
 
 ## 10. Errors
 
@@ -582,11 +611,11 @@ Use these application error codes:
 
 | Code | Meaning |
 | ---: | --- |
-| `-32000` | The browser is unavailable. |
-| `-32001` | The browser state changed. |
+| `-32000` | The browser is unavailable, or the browser or bridge did not respond. |
+| `-32001` | The browser state changed. The supplied revision is stale. |
 | `-32002` | A tab, window, group, or change does not exist. |
 | `-32003` | The browser does not support the operation. |
-| `-32004` | Another change is in progress. |
+| `-32004` | Another `apply` or `undo` is in progress. This code is not used for concurrent `get` requests. |
 | `-32005` | The change cannot be undone. |
 
 An action failure uses a short string code such as `TAB_NOT_FOUND`,
@@ -594,33 +623,33 @@ An action failure uses a short string code such as `TAB_NOT_FOUND`,
 
 ## 11. Firefox and Chromium differences
 
-The extension must hide browser API differences from the RPC client where it
-can. The future agent skill must still describe the semantic differences in
-this section. An agent must not assume that a `null` value means that the
-underlying browser state is false.
+The extension normalizes browser API differences for the RPC client. The future
+agent skill describes the semantic differences in this section. A `null` value
+means that the browser omitted the data; `false` represents a Boolean state.
 
 | Area | Firefox | Chromium | RPC rule |
 | --- | --- | --- | --- |
 | Background process | Manifest V3 uses a background script or event page. | Manifest V3 uses a service worker. | This is an implementation detail. |
-| Containers | Supports contextual identities and separate cookie stores. | Does not support Firefox containers. | `container` and `containerId` are `null` or unsupported on Chromium. |
+| Containers | Supports contextual identities and separate cookie stores. | Uses the standard browser cookie store. | `container` and `containerId` are `null` on Chromium. |
 | Last access | Exposes `Tab.lastAccessed`. | Exposes `Tab.lastAccessed` in current versions. | Return Unix time in milliseconds or `null`. |
-| Opener | Exposes `Tab.openerTabId` while the opener exists and is in the same window. | Exposes `Tab.openerTabId` while the opener exists. | Return the ID or `null`. Do not treat this as a durable relationship. |
-| Successor | Exposes `Tab.successorTabId`. | Does not expose a successor tab ID. | Return `null` on Chromium. |
-| Direct discarded creation | `tabs.create({discarded: true})` creates a tab without loading its target. | Current `tabs.create` has no `discarded` property. `tabs.discard` works only after tab creation. | Use direct creation on Firefox. Use a discarded local placeholder on Chromium and load the target on first activation. |
-| Tab groups | Supports current WebExtension tab group APIs. | Supports tab group APIs. | Return unsupported-operation when the installed browser lacks the required API. |
-| Collapsed active group | Keeps the active tab active and collapses the other tabs. | Moves activation outside the collapsed group. | Do not promise identical active-tab behavior after group collapse. |
+| Opener | Exposes `Tab.openerTabId` while the opener exists and is in the same window. | Exposes `Tab.openerTabId` while the opener exists. | Return the current ID or `null`; refresh it with each `get`. |
+| Successor | Exposes `Tab.successorTabId`. | RPC normalization supplies `null`. | Return the Firefox ID or Chromium `null`. |
+| Direct discarded creation | `tabs.create({discarded: true})` creates an unloaded target tab. | `tabs.discard()` discards a tab after creation. | Use direct creation on Firefox. Use a discarded local placeholder on Chromium and load the target on first activation. |
+| Tab groups | Supports current WebExtension tab group APIs. | Supports tab group APIs. | Execute on browsers that provide the required API; other versions return unsupported-operation. |
+| Collapsed active group | Keeps the active tab active and collapses the other tabs. | Moves activation outside the collapsed group. | Report the resulting active tab from a fresh `get`. |
 | Private windows | Access depends on the user giving the extension private-window permission. | Access depends on the user giving the extension incognito permission. | Return `privateWindowsIncluded` with every `get` result. |
 | Tab, window, and group IDs | IDs are scoped to a browser session. | IDs are scoped to a browser session. | Require a fresh `get` after restart and use revisions before changes. |
 | Native host allowlist | Uses `allowed_extensions`. | Uses `allowed_origins`. | Install a browser-specific native host manifest. |
 | Native host location | Uses Firefox-specific manifest directories. | Uses Chromium-specific manifest directories. | The installer must write both manifests on Linux and macOS. |
 
-The Chromium lazy-open fallback must not load the target website before the
-user activates the tab. `get` must return the intended target URL and title,
-not the internal placeholder URL, and must set `pendingOpen` to `true`.
+The Chromium lazy-open fallback keeps the target website unloaded until the
+user activates the tab. `get` returns the intended target URL and title and
+sets `pendingOpen` to `true`.
 
 The current Chromium API documentation and source schema list `discarded` on a
-Tab and support `tabs.discard()`. They do not list `discarded` in
-`tabs.create()` properties:
+Tab and support `tabs.discard()`. The `tabs.create()` properties comprise the
+standard creation fields such as URL, index, active state, pin state, opener,
+and window:
 
 - [Chromium Tabs API](https://developer.chrome.com/docs/extensions/reference/api/tabs)
 - [Chromium `tabs.json` source schema](https://chromium.googlesource.com/chromium/src/+/master/chrome/common/extensions/api/tabs.json)

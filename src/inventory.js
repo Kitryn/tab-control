@@ -84,7 +84,7 @@
       container,
       groupId: validGroupId(tab.groupId),
       openerTabId: valueOrNull(tab.openerTabId),
-      successorTabId: valueOrNull(tab.successorTabId)
+      successorTabId: validTabId(tab.successorTabId)
     };
   }
 
@@ -121,17 +121,17 @@
     const method = api.extension?.isAllowedIncognitoAccess;
     if (!method) return null;
 
-    if (global.browser && api === global.browser) {
-      try {
-        return await method.call(api.extension);
-      } catch {
-        return null;
-      }
-    }
-
     return new Promise((resolve) => {
+      let settled = false;
+      const finish = (allowed) => {
+        if (settled) return;
+        settled = true;
+        resolve(Boolean(allowed));
+      };
+
       try {
-        method.call(api.extension, (allowed) => resolve(Boolean(allowed)));
+        const result = method.call(api.extension, finish);
+        if (result?.then) result.then(finish, () => resolve(null));
       } catch {
         resolve(null);
       }
@@ -140,6 +140,10 @@
 
   function validGroupId(groupId) {
     return typeof groupId === "number" && groupId >= 0 ? groupId : null;
+  }
+
+  function validTabId(tabId) {
+    return typeof tabId === "number" && tabId >= 0 ? tabId : null;
   }
 
   function valueOrNull(value) {

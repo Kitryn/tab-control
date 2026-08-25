@@ -3,7 +3,7 @@
   "name": "Tab Control",
   "version": "0.1.0",
   "description": "Inspect and control browser tabs through an authorized local agent.",
-  "permissions": ["tabs", "tabGroups"],
+  "permissions": ["tabs", "tabGroups", "nativeMessaging"],
   "background": {
     "service_worker": "background.js"
   },
