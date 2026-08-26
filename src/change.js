@@ -51,15 +51,9 @@ export function createChange(api, inventory, actions = { validate, execute }) {
     const result = {
       changeId,
       revision,
+      complete: !executed.failed,
       actions: executed.results
     };
-    if (executed.failed) {
-      result.rollback = {
-        attempted: false,
-        complete: false,
-        warnings: []
-      };
-    }
     return { result };
   }
 

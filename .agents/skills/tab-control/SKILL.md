@@ -48,8 +48,11 @@ process call is one request.
 3. Decide the change from the inventory. Keep the `revision`.
 4. Call `apply` with that `revision`, a `description` that tells the user
    why, and one or more actions.
-5. If the response is `-32001`, call `get` again and make a new plan.
-6. If the response is `-32004`, wait, then call `apply` again or call `get`.
+5. Check `result.complete`. If it is `false`, earlier actions stay applied,
+   the failed action is the last item in `result.actions`, and later actions
+   were not attempted. Call `get` and make a new plan.
+6. If the response is `-32001`, call `get` again and make a new plan.
+7. If the response is `-32004`, wait, then call `apply` again or call `get`.
 
 `get` can run at the same time as another `get` on the same instance. A `get`
 that starts during `apply` waits and then returns a complete inventory.
@@ -101,8 +104,10 @@ Put only the tab IDs that the user named, or that the plan selected, in
 
 `windowId` is a window id from `get`. `index` `-1` means the end of that
 window. `windowId` `null` is not implemented yet (`newWindow` bind). The
-result `actions[].tabs` is what `tabs.move` actually moved (`id`, `windowId`,
-`index`). Empty `tabs` with `ok: true` is a browser no-op, not a failure.
+result has `complete: true` when all actions succeed and `complete: false`
+when execution stops on a failed action. The result `actions[].tabs` is what
+`tabs.move` actually moved (`id`, `windowId`, `index`). Empty `tabs` with
+`ok: true` is a browser no-op, not a failure.
 
 ## Errors that change the plan
 

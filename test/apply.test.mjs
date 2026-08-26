@@ -55,6 +55,7 @@ test("apply closes tabs when the revision matches", async () => {
   end();
 
   assert.equal(outcome.result.changeId, "1");
+  assert.equal(outcome.result.complete, true);
   assert.deepEqual(outcome.result.actions, [{ index: 0, ok: true }]);
   assert.deepEqual(api.tabs.removed, [7]);
 });
@@ -121,6 +122,7 @@ test("apply stops after a rejected move", async () => {
   });
   end();
 
+  assert.equal(outcome.result.complete, false);
   assert.deepEqual(outcome.result.actions, [{
     index: 0,
     ok: false,

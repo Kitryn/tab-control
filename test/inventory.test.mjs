@@ -129,6 +129,7 @@ test("request handler accepts get and apply close", async () => {
   assert.equal(success.result.windows[0].id, 1);
   assert.equal(failure.error.code, -32601);
   assert.equal(applied.result.changeId, "1");
+  assert.equal(applied.result.complete, true);
   assert.deepEqual(applied.result.actions, [{ index: 0, ok: true }]);
   assert.deepEqual(api.tabs.removed, [7]);
   delete globalThis.chrome;

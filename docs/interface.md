@@ -357,13 +357,17 @@ until undo work.
 
 `actions` must contain at least one action.
 
-Each executed action result includes `index` and `ok`. When the browser API
-returns tab or window objects, the result includes those ids and positions so
-the agent can see what actually happened. A native no-op is `ok: true` with an
-empty moved-tab list, not a validation error. The extension does not rewrite
-browser-specific `tabs.move` behavior (pinned regions, split views). Those
-follow the current browser. Ambiguous cases belong in the agent skill as a
-pointer to MDN or Chrome docs, not as extra RPC rules.
+The result has `complete: true` when all actions succeed. It has
+`complete: false` when a native action fails. Each attempted action result
+includes `index` and `ok`. Actions after the first failed action are not
+attempted and are not included.
+
+When the browser API returns tab or window objects, the result includes those
+ids and positions so the agent can see what actually happened. A native no-op
+is `ok: true` with an empty moved-tab list, not a validation error. The
+extension does not rewrite browser-specific `tabs.move` behavior (pinned
+regions, split views). Those follow the current browser. Ambiguous cases belong
+in the agent skill as a pointer to MDN or Chrome docs, not as extra RPC rules.
 
 ### Successful result
 
@@ -374,6 +378,7 @@ pointer to MDN or Chrome docs, not as extra RPC rules.
   "result": {
     "changeId": "174",
     "revision": 43,
+    "complete": true,
     "actions": [
       {
         "index": 0,
@@ -391,8 +396,8 @@ pointer to MDN or Chrome docs, not as extra RPC rules.
 
 ### Failed action
 
-The first failed action ends forward execution. Earlier actions in the list
-stay applied. The result has no `rollback` field.
+The first failed action ends forward execution and sets `complete` to `false`.
+Earlier actions in the list stay applied. The result has no `rollback` field.
 
 ```json
 {
@@ -401,6 +406,7 @@ stay applied. The result has no `rollback` field.
   "result": {
     "changeId": "174",
     "revision": 44,
+    "complete": false,
     "actions": [
       {
         "index": 0,
