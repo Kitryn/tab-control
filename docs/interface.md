@@ -289,8 +289,9 @@ tabs. A tab's `container` is the matching object or `null`. Chromium returns
 `lastAccessed` is the last time that the tab became active in its window.
 Current Firefox and Chromium versions expose this value.
 
-`openerTabId` identifies the tab that opened this tab. It remains available
-while the opener exists. Firefox also keeps the opener in the same window.
+`openerTabId` identifies the tab that opened this tab. Firefox keeps the
+opener in the same window. A browser can clear the relationship before the
+opener closes, so the extension always reports the current native value.
 `successorTabId` identifies the tab that Firefox selects after this tab closes.
 Chromium returns `null` for this Firefox-specific field.
 
@@ -606,7 +607,10 @@ returns the target `url` and `title` with `pendingOpen: true`. After the
 replace, `pendingOpen` is `false`. Other tabs return `pendingOpen: false`.
 The Chromium tab is a small live document until activation (`discarded` is
 `false` in the browser; the RPC still reports the target as unloaded via
-`pendingOpen`).
+`pendingOpen`). Chromium can clear `openerTabId` when the pending page
+navigates because it resets opener relationships for some non-link
+navigations. Preserving it requires overriding native behavior, so the
+extension does not restore it.
 
 Firefox accepts `containerId`. Chromium accepts `null`. The `open` action
 accepts fully qualified HTTP or HTTPS URLs. Agents never send `data:` or
@@ -790,7 +794,7 @@ current browser. The action result must include what the API moved.
 | Instance id | `storage.local` UUID, per profile. | `storage.local` UUID, per profile. | Socket path and `--instance` use this id. |
 | Containers | Supports contextual identities and separate cookie stores. | Uses the standard browser cookie store. | `container` and `containerId` are `null` on Chromium. |
 | Last access | Exposes `Tab.lastAccessed`. | Exposes `Tab.lastAccessed` in current versions. | Return Unix time in milliseconds or `null`. |
-| Opener | Exposes `Tab.openerTabId` while the opener exists and is in the same window. | Exposes `Tab.openerTabId` while the opener exists. | Return the current ID or `null`; refresh it with each `get`. |
+| Opener | Keeps the opener in the same window. | Can clear the opener during non-link navigation. | Return the current `Tab.openerTabId` or `null`; do not restore cleared relationships. |
 | Successor | Exposes `Tab.successorTabId`. | RPC normalization supplies `null`. | Return the Firefox ID or Chromium `null`. |
 | Direct discarded creation | `tabs.create({discarded: true})` creates an unloaded target tab. | No discarded-create. `open` uses a `data:text/html` document that replaces itself on first visible. | `get` returns the target URL and title. Chromium pending tabs set `pendingOpen: true`. |
 | Tab groups | `tabs.group` / `ungroup` from Firefox 138; `tabGroups.query` from 139. Manifest min is 119. | Tab group APIs on current Chrome. | `get` → `groups: []` without `tabGroups.query`. Create-`group` → `-32003` until `tabGroups.query` exists. |
