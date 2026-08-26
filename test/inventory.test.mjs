@@ -95,6 +95,7 @@ test("request handler accepts get and apply close", async () => {
   api.extension.isAllowedIncognitoAccess = (callback) => callback(true);
   globalThis.chrome = api;
   const { handleRequest } = await import("../src/background.js");
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   api.runtime.lastError = { message: "No such native application com.tab_control.bridge" };
   ports[0].onDisconnect.emit();

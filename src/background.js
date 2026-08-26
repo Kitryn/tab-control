@@ -84,8 +84,10 @@ function connectBridge() {
   });
 }
 
-instance = await loadInstance(extensionApi);
-connectBridge();
+loadInstance(extensionApi).then((loaded) => {
+  instance = loaded;
+  connectBridge();
+});
 
 extensionApi.runtime.onInstalled.addListener(() => {
   console.info("Tab Control installed");

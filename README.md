@@ -41,12 +41,7 @@ section 2.
 
 Firefox and Chromium start `dist/native-host` through Native Messaging. The
 checked-in host manifests are templates. `npm run install-host` writes them
-into the user Native Messaging directories and fills the absolute host path.
-
-After loading the unpacked Chromium extension, pass its ID:
-
-```sh
-npm run install-host -- --chromium-extension-id=<id>
-```
-
-Then reload the extension.
+into the user Native Messaging directories (Firefox, Chromium, Chrome, Brave,
+Edge, Helium) and fills the absolute host path. The Chromium extension id is
+pinned by the `key` in `manifests/chromium.json`, so unpacked loads keep the
+same id. Reload the extension after install-host.

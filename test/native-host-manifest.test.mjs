@@ -28,12 +28,15 @@ test("install fills the absolute host path", async () => {
   assert.deepEqual(filled.allowed_extensions, template.allowed_extensions);
 });
 
-test("install can set the Chromium extension id", async () => {
+test("chromium host template pins the unpacked extension origin", async () => {
   const template = JSON.parse(
     await readFile(join(root, "native-host-manifests", "chromium.json"), "utf8")
   );
-  const filled = filledHostManifest(template, "/opt/tab-control/native-host", "abcdefgh");
-  assert.deepEqual(filled.allowed_origins, ["chrome-extension://abcdefgh/"]);
+  const filled = filledHostManifest(template, "/opt/tab-control/native-host");
+  assert.equal(filled.path, "/opt/tab-control/native-host");
+  assert.deepEqual(filled.allowed_origins, [
+    "chrome-extension://ghnejmkfokehihhggmbhmnmcfjifekof/"
+  ]);
 });
 
 test("linux user destinations match the browser docs", () => {
@@ -43,6 +46,9 @@ test("linux user destinations match the browser docs", () => {
   ]);
   assert.deepEqual(destinations.chromium, [
     "/home/dev/.config/chromium/NativeMessagingHosts",
-    "/home/dev/.config/google-chrome/NativeMessagingHosts"
+    "/home/dev/.config/google-chrome/NativeMessagingHosts",
+    "/home/dev/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+    "/home/dev/.config/microsoft-edge/NativeMessagingHosts",
+    "/home/dev/.config/net.imput.helium/NativeMessagingHosts"
   ]);
 });

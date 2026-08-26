@@ -10,7 +10,6 @@ import {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const hostPath = resolve(root, "dist", "native-host");
-const chromiumExtensionId = extensionIdFromArgs(process.argv.slice(2));
 
 try {
   await access(hostPath);
@@ -32,14 +31,8 @@ await install(
 );
 await install(
   destinations.chromium,
-  filledHostManifest(chromiumTemplate, hostPath, chromiumExtensionId)
+  filledHostManifest(chromiumTemplate, hostPath)
 );
-
-if (!chromiumExtensionId) {
-  console.warn(
-    "Chromium allowed_origins still has the placeholder ID. Pass --chromium-extension-id=<id> after loading the unpacked extension."
-  );
-}
 
 console.log(`Installed ${HOST_NAME} -> ${hostPath}`);
 
@@ -51,13 +44,4 @@ async function install(directories, manifest) {
     await writeFile(file, body);
     console.log(file);
   }
-}
-
-function extensionIdFromArgs(arguments_) {
-  for (const argument of arguments_) {
-    if (argument.startsWith("--chromium-extension-id=")) {
-      return argument.slice("--chromium-extension-id=".length);
-    }
-  }
-  return undefined;
 }
