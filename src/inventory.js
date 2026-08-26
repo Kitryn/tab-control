@@ -1,3 +1,5 @@
+import { decodePendingOpen } from "./pending-open.js";
+
 export function createInventory(api, now = Date.now) {
   let revision = 1;
 
@@ -40,6 +42,7 @@ export function createInventory(api, now = Date.now) {
       capturedAt: now(),
       privateWindowsIncluded,
       windows: windows.map((window) => normalizeWindow(window, containers)),
+      containers: [...containers.values()],
       groups
     };
   }
@@ -63,17 +66,18 @@ function normalizeTab(tab, containers) {
   const container = tab.cookieStoreId && containers.has(tab.cookieStoreId)
     ? containers.get(tab.cookieStoreId)
     : null;
+  const pendingOpen = decodePendingOpen(tab.url) ?? decodePendingOpen(tab.pendingUrl);
 
   return {
     id: valueOrNull(tab.id),
     index: valueOrNull(tab.index),
-    url: valueOrNull(tab.url),
-    pendingUrl: valueOrNull(tab.pendingUrl),
-    title: valueOrNull(tab.title),
+    url: pendingOpen?.url ?? valueOrNull(tab.url),
+    pendingUrl: pendingOpen ? null : valueOrNull(tab.pendingUrl),
+    title: pendingOpen?.title ?? valueOrNull(tab.title),
     active: booleanOrNull(tab.active),
     pinned: booleanOrNull(tab.pinned),
     discarded: booleanOrNull(tab.discarded),
-    pendingOpen: false,
+    pendingOpen: Boolean(pendingOpen),
     hidden: booleanOrNull(tab.hidden),
     audible: booleanOrNull(tab.audible),
     muted: booleanOrNull(muted),
@@ -87,31 +91,23 @@ function normalizeTab(tab, containers) {
 
 async function getContainers(api) {
   if (!api.contextualIdentities?.query) return new Map();
-  try {
-    const identities = await api.contextualIdentities.query({});
-    return new Map(identities.map((identity) => [identity.cookieStoreId, {
-      id: identity.cookieStoreId,
-      name: identity.name
-    }]));
-  } catch {
-    return new Map();
-  }
+  const identities = await api.contextualIdentities.query({});
+  return new Map(identities.map((identity) => [identity.cookieStoreId, {
+    id: identity.cookieStoreId,
+    name: identity.name
+  }]));
 }
 
 async function getGroups(api) {
   if (!api.tabGroups?.query) return [];
-  try {
-    const groups = await api.tabGroups.query({});
-    return groups.map((group) => ({
-      id: valueOrNull(group.id),
-      windowId: valueOrNull(group.windowId),
-      title: valueOrNull(group.title),
-      color: valueOrNull(group.color),
-      collapsed: booleanOrNull(group.collapsed)
-    }));
-  } catch {
-    return [];
-  }
+  const groups = await api.tabGroups.query({});
+  return groups.map((group) => ({
+    id: valueOrNull(group.id),
+    windowId: valueOrNull(group.windowId),
+    title: valueOrNull(group.title),
+    color: valueOrNull(group.color),
+    collapsed: booleanOrNull(group.collapsed)
+  }));
 }
 
 async function getPrivateWindowAccess(api) {

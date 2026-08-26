@@ -22,6 +22,11 @@ for (const browser of ["firefox", "chromium"]) {
   const output = join(outputRoot, browser);
   await mkdir(output, { recursive: true });
   await cp(source, output, { recursive: true });
+  await writeFile(
+    join(output, "platform.js"),
+    `export { platform } from "./platforms/${browser}.js";\n`,
+    "utf8"
+  );
   await cp(join(manifestSource, `${browser}.json`), join(output, "manifest.json"));
 }
 

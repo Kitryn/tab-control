@@ -34,8 +34,8 @@ process call is one request.
 
 | Method | Use |
 | --- | --- |
-| `get` | Read all windows, tabs, and groups. The result includes `revision`. |
-| `apply` | Run an ordered action list. Implemented actions: `close`, `move`. |
+| `get` | Read all windows, tabs, containers, and groups. The result includes `revision`. |
+| `apply` | Run an ordered action list. Implemented actions: `close`, `move`, `open`. |
 
 `undo` is in the interface. The extension has no `undo` implementation yet.
 
@@ -109,12 +109,35 @@ when execution stops on a failed action. The result `actions[].tabs` is what
 `tabs.move` actually moved (`id`, `windowId`, `index`). Empty `tabs` with
 `ok: true` is a browser no-op, not a failure.
 
+## `open`
+
+```json
+{
+  "type": "open",
+  "windowId": 1,
+  "index": -1,
+  "tabs": [{
+    "url": "https://example.com/",
+    "title": "Example",
+    "pinned": false,
+    "containerId": null,
+    "openerTabId": null
+  }]
+}
+```
+
+`open` accepts absolute HTTP and HTTPS URLs. It creates inactive tabs without
+loading the target websites. Firefox accepts a container ID from `get`;
+Chromium requires `containerId: null`. A numeric `index` places the first tab,
+and `-1` appends all tabs. If part of the action fails, its result lists tabs
+that were already created. Call `get` before making a new plan.
+
 ## Errors that change the plan
 
 | Code | Next step |
 | ---: | --- |
 | `-32001` | Call `get`. The supplied revision is old. |
-| `-32002` | Call `get`. A tab, window, or group is gone. |
+| `-32002` | Call `get`. A tab, window, container, or group is gone. |
 | `-32003` | Use an implemented action. |
 | `-32004` | Wait. Then send the change again. |
 | `-32000` | The browser or the bridge gave no response. |

@@ -6,7 +6,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "tab-control@example.invalid",
-      "strict_min_version": "112.0"
+      "strict_min_version": "119.0"
     }
   },
   "permissions": ["storage", "tabs", "contextualIdentities", "cookies", "tabGroups", "nativeMessaging"],

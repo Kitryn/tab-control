@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createInventory } from "../src/inventory.js";
+import { encodePendingOpen } from "../src/pending-open.js";
 
 test("get returns normalized browser state", async () => {
   const api = mockApi();
@@ -21,6 +22,10 @@ test("get returns normalized browser state", async () => {
   assert.equal(result.windows[0].tabs[0].openerTabId, 6);
   assert.equal(result.windows[0].tabs[0].successorTabId, 8);
   assert.equal(result.windows[0].tabs[0].pendingUrl, null);
+  assert.deepEqual(result.containers, [{
+    id: "firefox-container-1",
+    name: "Work"
+  }]);
   assert.deepEqual(result.groups, [{
     id: 3,
     windowId: 1,
@@ -57,7 +62,41 @@ test("omitted browser fields use null", async () => {
   assert.equal(tab.groupId, 3);
   assert.equal(tab.lastAccessed, null);
   assert.equal(tab.successorTabId, null);
+  assert.deepEqual(result.containers, []);
   assert.deepEqual(result.groups, []);
+});
+
+test("get propagates container and group query failures", async () => {
+  const containerApi = mockApi();
+  containerApi.contextualIdentities.query = async () => {
+    throw new Error("Container query failed");
+  };
+  await assert.rejects(createInventory(containerApi).get(), /Container query failed/);
+
+  const groupApi = mockApi();
+  groupApi.tabGroups.query = async () => {
+    throw new Error("Group query failed");
+  };
+  await assert.rejects(createInventory(groupApi).get(), /Group query failed/);
+});
+
+test("Chromium pending tabs expose their target without loading it", async () => {
+  const api = mockApi();
+  delete api.contextualIdentities;
+  const tab = api.windows.value[0].tabs[0];
+  const pendingUrl = encodePendingOpen("https://example.com/later", "Read later");
+  tab.url = "data:text/html;charset=utf-8,different-document"
+    + pendingUrl.slice(pendingUrl.indexOf("#tab-control-pending-open="));
+  tab.title = "data page";
+
+  const result = await createInventory(api).get();
+  const normalized = result.windows[0].tabs[0];
+
+  assert.equal(normalized.url, "https://example.com/later");
+  assert.equal(normalized.pendingUrl, null);
+  assert.equal(normalized.title, "Read later");
+  assert.equal(normalized.pendingOpen, true);
+  assert.equal(normalized.discarded, false);
 });
 
 test("negative successor IDs use null", async () => {

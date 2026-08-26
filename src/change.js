@@ -1,6 +1,6 @@
 import { validate, execute } from "./actions.js";
 
-export function createChange(api, inventory, actions = { validate, execute }) {
+export function createChange(api, inventory, platform, actions = { validate, execute }) {
   let busy = null;
   let nextId = 1;
 
@@ -38,15 +38,13 @@ export function createChange(api, inventory, actions = { validate, execute }) {
     }
 
     const state = await inventory.get();
-    const validated = actions.validate(state, params.actions);
+    const validated = actions.validate(state, params.actions, platform);
     if (validated.error) return { error: validated.error };
 
     const changeId = String(nextId);
     nextId += 1;
-    const snapshot = state;
-    void snapshot;
 
-    const executed = await actions.execute(api, validated.plan);
+    const executed = await actions.execute(api, validated.plan, platform);
     const revision = inventory.currentRevision();
     const result = {
       changeId,

@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createInventory } from "../src/inventory.js";
-import { validate } from "../src/actions.js";
+import { execute, validate } from "../src/actions.js";
 import { createChange } from "../src/change.js";
+import { decodePendingOpen } from "../src/pending-open.js";
+import { platform as chromiumPlatform } from "../src/platforms/chromium.js";
+import { platform as firefoxPlatform } from "../src/platforms/firefox.js";
 
 test("close validation accepts existing tabs and rejects missing ones", async () => {
   const state = await createInventory(mockApi()).get();
@@ -45,7 +48,7 @@ test("move validation accepts a live window and rejects a missing one", async ()
 
 test("apply closes tabs when the revision matches", async () => {
   const api = mockApi();
-  const change = createChange(api, createInventory(api));
+  const change = createChange(api, createInventory(api), chromiumPlatform);
   const end = change.begin();
   const outcome = await change.apply({
     revision: 1,
@@ -73,7 +76,7 @@ test("apply moves tabs and reports the API positions", async () => {
       index: props.index + offset
     }));
   };
-  const change = createChange(api, createInventory(api));
+  const change = createChange(api, createInventory(api), chromiumPlatform);
   const end = change.begin();
   const outcome = await change.apply({
     revision: 1,
@@ -93,7 +96,7 @@ test("apply moves tabs and reports the API positions", async () => {
 test("apply treats a move no-op as success with no tabs", async () => {
   const api = mockApi();
   api.tabs.move = async () => [];
-  const change = createChange(api, createInventory(api));
+  const change = createChange(api, createInventory(api), chromiumPlatform);
   const end = change.begin();
   const outcome = await change.apply({
     revision: 1,
@@ -110,7 +113,7 @@ test("apply stops after a rejected move", async () => {
   api.tabs.move = async () => {
     throw new Error("No window with id: 2");
   };
-  const change = createChange(api, createInventory(api));
+  const change = createChange(api, createInventory(api), chromiumPlatform);
   const end = change.begin();
   const outcome = await change.apply({
     revision: 1,
@@ -126,7 +129,258 @@ test("apply stops after a rejected move", async () => {
   assert.deepEqual(outcome.result.actions, [{
     index: 0,
     ok: false,
-    error: { code: "WINDOW_NOT_FOUND", message: "No window with id: 2" }
+    error: { code: "BROWSER_REJECTED", message: "No window with id: 2" }
+  }]);
+  assert.deepEqual(api.tabs.removed, []);
+});
+
+test("execution rejects an unknown plan step without closing tabs", async () => {
+  const api = mockApi();
+
+  const outcome = await execute(api, [{ type: "group", tabIds: [7] }], chromiumPlatform);
+
+  assert.equal(outcome.failed, true);
+  assert.deepEqual(api.tabs.removed, []);
+  assert.deepEqual(outcome.results, [{
+    index: 0,
+    ok: false,
+    error: {
+      code: "UNSUPPORTED_OPERATION",
+      message: "Unsupported plan step: group"
+    }
+  }]);
+});
+
+test("open validation accepts HTTP tabs and rejects invalid targets", async () => {
+  const api = mockApi();
+  const state = await createInventory(api).get();
+  const action = {
+    type: "open",
+    windowId: 1,
+    index: -1,
+    tabs: [{
+      url: "https://example.com/docs",
+      title: "Docs",
+      pinned: false,
+      containerId: "firefox-container-1",
+      openerTabId: 7
+    }]
+  };
+
+  assert.deepEqual(validate(state, [action], firefoxPlatform).plan, [action]);
+  assert.equal(validate(state, [{ ...action, windowId: 9 }], firefoxPlatform).error.code, -32002);
+  assert.equal(validate(state, [{ ...action, tabs: [] }], firefoxPlatform).error.code, -32602);
+  assert.equal(validate(state, [{
+    ...action,
+    tabs: [{ ...action.tabs[0], url: "data:text/plain,no" }]
+  }], firefoxPlatform).error.code, -32602);
+  assert.equal(validate(state, [{
+    ...action,
+    tabs: [{ ...action.tabs[0], openerTabId: 99 }]
+  }], firefoxPlatform).error.code, -32002);
+
+  assert.equal(validate(state, [action], chromiumPlatform).error.code, -32602);
+  assert.equal(validate(state, [{
+    ...action,
+    tabs: [{ ...action.tabs[0], containerId: "firefox-container-missing" }]
+  }], firefoxPlatform).error.code, -32002);
+});
+
+test("open uses discarded Firefox tabs and pins them after creation", async () => {
+  const api = mockApi();
+  const nativeTabs = new Map();
+  api.tabs.created = [];
+  api.tabs.updated = [];
+  api.tabs.create = async (properties) => {
+    api.tabs.created.push(properties);
+    const tab = {
+      id: 30 + api.tabs.created.length,
+      windowId: properties.windowId,
+      index: properties.index ?? api.tabs.created.length,
+      pinned: false
+    };
+    nativeTabs.set(tab.id, tab);
+    return { ...tab };
+  };
+  api.tabs.update = async (id, properties) => {
+    api.tabs.updated.push({ id, ...properties });
+    Object.assign(nativeTabs.get(id), properties, { index: 0 });
+    return { ...nativeTabs.get(id) };
+  };
+  api.tabs.get = async (id) => ({ ...nativeTabs.get(id) });
+  const change = createChange(api, createInventory(api), firefoxPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Open the reference pages",
+    actions: [{
+      type: "open",
+      windowId: 1,
+      index: 1,
+      tabs: [
+        {
+          url: "https://example.com/one",
+          title: "One",
+          pinned: true,
+          containerId: "firefox-container-1",
+          openerTabId: 7
+        },
+        {
+          url: "https://example.com/two",
+          title: "Two",
+          pinned: false,
+          containerId: null,
+          openerTabId: null
+        }
+      ]
+    }]
+  });
+  end();
+
+  assert.deepEqual(api.tabs.created, [
+    {
+      windowId: 1,
+      index: 1,
+      active: false,
+      url: "https://example.com/one",
+      discarded: true,
+      title: "One",
+      cookieStoreId: "firefox-container-1",
+      openerTabId: 7
+    },
+    {
+      windowId: 1,
+      index: 2,
+      active: false,
+      url: "https://example.com/two",
+      discarded: true,
+      title: "Two"
+    }
+  ]);
+  assert.deepEqual(api.tabs.updated, [{ id: 31, pinned: true }]);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: true,
+    tabs: [
+      { id: 31, windowId: 1, index: 0 },
+      { id: 32, windowId: 1, index: 2 }
+    ]
+  }]);
+});
+
+test("open uses a self-contained pending page on Chromium", async () => {
+  const api = mockApi();
+  delete api.contextualIdentities;
+  let created;
+  api.tabs.create = async (properties) => {
+    created = properties;
+    return { id: 31, windowId: properties.windowId, index: 1 };
+  };
+  api.tabs.get = async (id) => ({ id, windowId: 1, index: 1 });
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Open a reference page",
+    actions: [{
+      type: "open",
+      windowId: 1,
+      index: -1,
+      tabs: [{
+        url: "https://example.com/later",
+        title: "Read later",
+        pinned: false,
+        containerId: null,
+        openerTabId: null
+      }]
+    }]
+  });
+  end();
+
+  assert.equal(created.active, false);
+  assert.equal(created.windowId, 1);
+  assert.equal("index" in created, false);
+  assert.deepEqual(decodePendingOpen(created.url), {
+    url: "https://example.com/later",
+    title: "Read later"
+  });
+  assert.equal(outcome.result.complete, true);
+});
+
+test("open fails instead of reporting stale positions when final lookup fails", async () => {
+  const api = mockApi();
+  api.tabs.create = async (properties) => ({
+    id: 31,
+    windowId: properties.windowId,
+    index: 1
+  });
+  api.tabs.get = async () => {
+    throw new Error("No tab with id: 31");
+  };
+  const change = createChange(api, createInventory(api), firefoxPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Open a reference page",
+    actions: [{
+      type: "open",
+      windowId: 1,
+      index: -1,
+      tabs: [{
+        url: "https://example.com/later",
+        title: "Read later",
+        pinned: false,
+        containerId: null,
+        openerTabId: null
+      }]
+    }]
+  });
+  end();
+
+  assert.equal(outcome.result.complete, false);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: false,
+    tabs: [{ id: 31, windowId: null, index: null }],
+    error: { code: "BROWSER_REJECTED", message: "No tab with id: 31" }
+  }]);
+});
+
+test("failed open reports tabs that were already created", async () => {
+  const api = mockApi();
+  let calls = 0;
+  api.tabs.create = async (properties) => {
+    calls += 1;
+    if (calls === 2) throw new Error("The browser rejected the URL");
+    return { id: 31, windowId: properties.windowId, index: 1 };
+  };
+  api.tabs.get = async (id) => ({ id, windowId: 1, index: 1 });
+  const change = createChange(api, createInventory(api), firefoxPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Open two reference pages",
+    actions: [
+      {
+        type: "open",
+        windowId: 1,
+        index: -1,
+        tabs: [
+          { url: "https://example.com/one", title: "One", pinned: false, containerId: null, openerTabId: null },
+          { url: "https://example.com/two", title: "Two", pinned: false, containerId: null, openerTabId: null }
+        ]
+      },
+      { type: "close", tabIds: [7] }
+    ]
+  });
+  end();
+
+  assert.equal(outcome.result.complete, false);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: false,
+    tabs: [{ id: 31, windowId: 1, index: 1 }],
+    error: { code: "BROWSER_REJECTED", message: "The browser rejected the URL" }
   }]);
   assert.deepEqual(api.tabs.removed, []);
 });
@@ -134,7 +388,7 @@ test("apply stops after a rejected move", async () => {
 test("apply rejects a stale revision", async () => {
   const api = mockApi();
   const inventory = createInventory(api);
-  const change = createChange(api, inventory);
+  const change = createChange(api, inventory, chromiumPlatform);
   api.tabs.onUpdated.emit();
   const end = change.begin();
   const outcome = await change.apply({
@@ -158,7 +412,7 @@ test("a second apply fails immediately while one is running", async () => {
   api.tabs.remove = () => new Promise((resolve) => {
     release = resolve;
   });
-  const change = createChange(api, createInventory(api));
+  const change = createChange(api, createInventory(api), chromiumPlatform);
 
   const firstEnd = change.begin();
   assert.equal(change.begin(), null);
@@ -183,7 +437,7 @@ test("idle waits until the running change finishes", async () => {
   api.tabs.remove = () => new Promise((resolve) => {
     release = resolve;
   });
-  const change = createChange(api, createInventory(api));
+  const change = createChange(api, createInventory(api), chromiumPlatform);
   const end = change.begin();
   const applying = change.apply({
     revision: 1,

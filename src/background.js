@@ -1,10 +1,11 @@
 import { createInventory } from "./inventory.js";
 import { createChange } from "./change.js";
 import { loadInstance } from "./instance.js";
+import { platform } from "./platform.js";
 
 const extensionApi = globalThis.browser ?? globalThis.chrome;
 const inventory = createInventory(extensionApi);
-const change = createChange(extensionApi, inventory);
+const change = createChange(extensionApi, inventory, platform);
 
 let instance = null;
 let reconnectTimer = 0;
