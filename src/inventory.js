@@ -6,21 +6,21 @@ export function createInventory(api, now = Date.now) {
   }
 
   function listen(event) {
-    if (event?.addListener) event.addListener(markChanged);
+    if (event) event.addListener(markChanged);
   }
 
-  listen(api.tabs?.onCreated);
-  listen(api.tabs?.onUpdated);
-  listen(api.tabs?.onMoved);
-  listen(api.tabs?.onAttached);
-  listen(api.tabs?.onDetached);
-  listen(api.tabs?.onActivated);
-  listen(api.tabs?.onHighlighted);
-  listen(api.tabs?.onRemoved);
-  listen(api.tabs?.onReplaced);
-  listen(api.windows?.onCreated);
-  listen(api.windows?.onFocusChanged);
-  listen(api.windows?.onRemoved);
+  listen(api.tabs.onCreated);
+  listen(api.tabs.onUpdated);
+  listen(api.tabs.onMoved);
+  listen(api.tabs.onAttached);
+  listen(api.tabs.onDetached);
+  listen(api.tabs.onActivated);
+  listen(api.tabs.onHighlighted);
+  listen(api.tabs.onRemoved);
+  listen(api.tabs.onReplaced);
+  listen(api.windows.onCreated);
+  listen(api.windows.onFocusChanged);
+  listen(api.windows.onRemoved);
   listen(api.tabGroups?.onCreated);
   listen(api.tabGroups?.onMoved);
   listen(api.tabGroups?.onRemoved);

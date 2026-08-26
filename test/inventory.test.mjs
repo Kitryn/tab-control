@@ -71,18 +71,35 @@ test("negative successor IDs use null", async () => {
 
 test("request handler accepts get and apply close", async () => {
   const api = mockApi();
+  const ports = [];
   api.runtime = {
     onInstalled: event(),
-    connectNative: () => ({
-      onMessage: event(),
-      onDisconnect: event(),
-      postMessage() {}
-    }),
+    getBrowserInfo: async () => ({ name: "Firefox" }),
+    connectNative: () => {
+      const port = {
+        onMessage: event(),
+        onDisconnect: event(),
+        postMessage() {}
+      };
+      ports.push(port);
+      return port;
+    },
     lastError: null
+  };
+  api.storage = {
+    local: {
+      get: async () => ({ instanceId: "945f84ab-1234-4000-8000-000000000001" }),
+      set: async () => {}
+    }
   };
   api.extension.isAllowedIncognitoAccess = (callback) => callback(true);
   globalThis.chrome = api;
   const { handleRequest } = await import("../src/background.js");
+
+  api.runtime.lastError = { message: "No such native application com.tab_control.bridge" };
+  ports[0].onDisconnect.emit();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(ports.length, 1);
 
   const success = await handleRequest({
     jsonrpc: "2.0",

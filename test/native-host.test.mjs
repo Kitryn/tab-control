@@ -8,19 +8,25 @@ import { buildNativeBins, nativeHost, tabctl } from "../scripts/native-bins.mjs"
 
 await buildNativeBins();
 
+const identity = {
+  instanceId: "945f84ab-1234-4000-8000-000000000001",
+  browser: "Firefox"
+};
+
 test("native host relays a CLI request and native response", async () => {
   const directory = await mkdtemp(join(tmpdir(), "tab-control-native-test-"));
-  const socketPath = join(directory, "bridge.sock");
   const host = spawn(nativeHost, [], {
     cwd: process.cwd(),
-    env: { ...process.env, TAB_CONTROL_SOCKET: socketPath },
+    env: testEnv(directory),
     stdio: ["pipe", "pipe", "pipe"]
   });
 
   try {
-    await waitForListening(host);
+    const listening = waitForListening(host);
+    writeNativeMessage(host.stdin, identity);
+    await listening;
     const nextMessage = nativeMessageReader(host.stdout);
-    const client = runClient(tabctl, socketPath, {
+    const client = runClient(directory, {
       jsonrpc: "2.0",
       id: 12,
       method: "get",
@@ -59,23 +65,24 @@ test("native host relays a CLI request and native response", async () => {
 
 test("native host multiplexes concurrent clients and restores ids", async () => {
   const directory = await mkdtemp(join(tmpdir(), "tab-control-native-test-"));
-  const socketPath = join(directory, "bridge.sock");
   const host = spawn(nativeHost, [], {
     cwd: process.cwd(),
-    env: { ...process.env, TAB_CONTROL_SOCKET: socketPath },
+    env: testEnv(directory),
     stdio: ["pipe", "pipe", "pipe"]
   });
 
   try {
-    await waitForListening(host);
+    const listening = waitForListening(host);
+    writeNativeMessage(host.stdin, identity);
+    await listening;
     const nextMessage = nativeMessageReader(host.stdout);
-    const first = runClient(tabctl, socketPath, {
+    const first = runClient(directory, {
       jsonrpc: "2.0",
       id: 1,
       method: "get",
       params: { probe: "a" }
     });
-    const second = runClient(tabctl, socketPath, {
+    const second = runClient(directory, {
       jsonrpc: "2.0",
       id: 1,
       method: "get",
@@ -121,20 +128,17 @@ test("native host multiplexes concurrent clients and restores ids", async () => 
 
 test("native host times out a hung request", async () => {
   const directory = await mkdtemp(join(tmpdir(), "tab-control-native-test-"));
-  const socketPath = join(directory, "bridge.sock");
   const host = spawn(nativeHost, [], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      TAB_CONTROL_SOCKET: socketPath,
-      TAB_CONTROL_TIMEOUT_MS: "50"
-    },
+    env: testEnv(directory, { TAB_CONTROL_TIMEOUT_MS: "50" }),
     stdio: ["pipe", "pipe", "pipe"]
   });
 
   try {
-    await waitForListening(host);
-    const result = await runClient(tabctl, socketPath, {
+    const listening = waitForListening(host);
+    writeNativeMessage(host.stdin, identity);
+    await listening;
+    const result = await runClient(directory, {
       jsonrpc: "2.0",
       id: 4,
       method: "get",
@@ -157,6 +161,39 @@ test("native host times out a hung request", async () => {
   }
 });
 
+test("native host answers describe without a native round trip", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "tab-control-native-test-"));
+  const host = spawn(nativeHost, [], {
+    cwd: process.cwd(),
+    env: testEnv(directory),
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+
+  try {
+    const listening = waitForListening(host);
+    writeNativeMessage(host.stdin, identity);
+    await listening;
+    const result = await runClient(directory, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "describe",
+      params: {}
+    });
+    assert.deepEqual(JSON.parse(result.stdout), {
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        instanceId: identity.instanceId,
+        browser: "Firefox"
+      }
+    });
+  } finally {
+    host.kill("SIGTERM");
+    await new Promise((resolve) => host.once("close", resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function waitForListening(host) {
   return new Promise((resolve, reject) => {
     host.stderr.setEncoding("utf8");
@@ -170,11 +207,17 @@ function waitForListening(host) {
   });
 }
 
-function runClient(tabctl, socketPath, request, extraEnv = {}) {
+function testEnv(directory, extra = {}) {
+  const env = { ...process.env, TAB_CONTROL_SOCKET_DIR: directory, ...extra };
+  delete env.TAB_CONTROL_SOCKET;
+  return env;
+}
+
+function runClient(directory, request, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(tabctl, ["rpc"], {
       cwd: process.cwd(),
-      env: { ...process.env, TAB_CONTROL_SOCKET: socketPath, ...extraEnv },
+      env: testEnv(directory, extraEnv),
       stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";

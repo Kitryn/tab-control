@@ -1,10 +1,11 @@
 use tab_control as bridge;
-use serde_json::Value;
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process;
@@ -22,38 +23,77 @@ type Pending = Arc<Mutex<HashMap<u64, Waiter>>>;
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("{error}");
+        eprintln!("{error:#}");
         process::exit(1);
     }
 }
 
-fn run() -> io::Result<()> {
-    let socket_path = bridge::socket_path();
-    remove_stale_socket(&socket_path)?;
-
-    let listener = UnixListener::bind(&socket_path)?;
-    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
-    let _socket = SocketGuard(socket_path.clone());
-
-    eprintln!("Tab Control bridge listening on {}", socket_path.display());
-
+fn run() -> Result<()> {
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let output = Arc::new(Mutex::new(io::stdout()));
     let next_id = Arc::new(AtomicU64::new(1));
-    let listener_pending = Arc::clone(&pending);
-    let listener_output = Arc::clone(&output);
-    let listener_next_id = Arc::clone(&next_id);
 
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let Some(message) = read_native_message(&mut input)? else {
+        bail!("Tab Control identity is missing");
+    };
+    let value: Value = serde_json::from_slice(&message).context("Tab Control identity is invalid")?;
+    let Some(identity) = bridge::parse_identity(&value) else {
+        bail!("Tab Control identity is invalid");
+    };
+
+    let socket_path = bridge::instance_socket_path(&identity.instance_id);
+    let listener = bind_instance_socket(&socket_path)?;
+    let _socket = SocketGuard(socket_path.clone());
+    spawn_listener(
+        listener,
+        Arc::clone(&pending),
+        Arc::clone(&output),
+        Arc::clone(&next_id),
+        Arc::new(identity),
+    );
+    eprintln!("Tab Control bridge listening on {}", socket_path.display());
+
+    while let Some(message) = read_native_message(&mut input)? {
+        let Ok(mut response) = serde_json::from_slice::<Value>(&message) else {
+            continue;
+        };
+        let Some(correlation) = response.get("id").and_then(Value::as_u64) else {
+            continue;
+        };
+        let Some(waiter) = pending.lock().unwrap().remove(&correlation) else {
+            continue;
+        };
+        if !bridge::set_json_id(&mut response, waiter.original_id) {
+            continue;
+        }
+        let _ = waiter.sender.send(response.to_string().into_bytes());
+    }
+
+    Ok(())
+}
+
+fn spawn_listener(
+    listener: UnixListener,
+    pending: Pending,
+    output: Arc<Mutex<io::Stdout>>,
+    next_id: Arc<AtomicU64>,
+    identity: Arc<bridge::Identity>,
+) {
     thread::spawn(move || {
         for connection in listener.incoming() {
             match connection {
                 Ok(stream) => {
-                    let pending = Arc::clone(&listener_pending);
-                    let output = Arc::clone(&listener_output);
-                    let next_id = Arc::clone(&listener_next_id);
+                    let pending = Arc::clone(&pending);
+                    let output = Arc::clone(&output);
+                    let next_id = Arc::clone(&next_id);
+                    let identity = Arc::clone(&identity);
                     thread::spawn(move || {
-                        if let Err(error) = handle_client(stream, pending, output, next_id) {
-                            eprintln!("Unix socket error: {error}");
+                        if let Err(error) =
+                            handle_client(stream, pending, output, next_id, identity)
+                        {
+                            eprintln!("Unix socket error: {error:#}");
                         }
                     });
                 }
@@ -64,26 +104,6 @@ fn run() -> io::Result<()> {
             }
         }
     });
-
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    while let Some(response) = read_native_message(&mut input)? {
-        let Ok(mut response) = bridge::parse_json(&response) else {
-            continue;
-        };
-        let Some(correlation) = bridge::json_id(&response).and_then(Value::as_u64) else {
-            continue;
-        };
-        let Some(waiter) = pending.lock().unwrap().remove(&correlation) else {
-            continue;
-        };
-        if !bridge::set_json_id(&mut response, waiter.original_id) {
-            continue;
-        }
-        let _ = waiter.sender.send(bridge::to_json_vec(&response));
-    }
-
-    Ok(())
 }
 
 fn handle_client(
@@ -91,7 +111,8 @@ fn handle_client(
     pending: Pending,
     output: Arc<Mutex<io::Stdout>>,
     next_id: Arc<AtomicU64>,
-) -> io::Result<()> {
+    identity: Arc<bridge::Identity>,
+) -> Result<()> {
     let mut request = Vec::new();
     BufReader::new(stream.try_clone()?).read_until(b'\n', &mut request)?;
     if request.is_empty() {
@@ -104,11 +125,10 @@ fn handle_client(
         request.pop();
     }
 
-    if let Err(error) = write_rpc_response(&mut stream, &dispatch(&request, pending, output, next_id))
-    {
-        return Err(error);
-    }
-    Ok(())
+    write_rpc_response(
+        &mut stream,
+        &dispatch(&request, pending, output, next_id, identity),
+    )
 }
 
 fn dispatch(
@@ -116,18 +136,36 @@ fn dispatch(
     pending: Pending,
     output: Arc<Mutex<io::Stdout>>,
     next_id: Arc<AtomicU64>,
+    identity: Arc<bridge::Identity>,
 ) -> Vec<u8> {
-    let Ok(mut request) = bridge::parse_json(request) else {
-        return bridge::rpc_error(Value::Null, -32600, "Invalid request");
+    let Ok(mut request) = serde_json::from_slice::<Value>(request) else {
+        return rpc_error(Value::Null, -32600, "Invalid request");
     };
-    let Some(original_id) = bridge::json_id(&request).cloned() else {
-        return bridge::rpc_error(Value::Null, -32600, "Invalid request");
+    let Some(original_id) = request.get("id").cloned() else {
+        return rpc_error(Value::Null, -32600, "Invalid request");
     };
+
+    if request.get("method").and_then(Value::as_str) == Some("describe") {
+        if !bridge::params_empty(&request) {
+            return rpc_error(original_id, -32602, "Invalid parameters");
+        }
+        return json!({
+            "jsonrpc": "2.0",
+            "id": original_id,
+            "result": {
+                "instanceId": identity.instance_id,
+                "browser": identity.browser
+            }
+        })
+        .to_string()
+        .into_bytes();
+    }
+
     let correlation = next_id.fetch_add(1, Ordering::Relaxed);
     if !bridge::set_json_id(&mut request, correlation) {
-        return bridge::rpc_error(original_id, -32600, "Invalid request");
+        return rpc_error(original_id, -32600, "Invalid request");
     }
-    let forwarded = bridge::to_json_vec(&request);
+    let forwarded = request.to_string().into_bytes();
 
     let (sender, receiver) = mpsc::sync_channel(1);
     pending.lock().unwrap().insert(
@@ -140,28 +178,35 @@ fn dispatch(
 
     if write_native_message(&mut *output.lock().unwrap(), &forwarded).is_err() {
         pending.lock().unwrap().remove(&correlation);
-        return bridge::rpc_error(original_id, -32000, "The browser is unavailable");
+        return rpc_error(original_id, -32000, "The browser is unavailable");
     }
 
     match receiver.recv_timeout(bridge::request_timeout()) {
         Ok(response) => response,
-        Err(RecvTimeoutError::Timeout) => {
+        Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {
             pending.lock().unwrap().remove(&correlation);
-            bridge::rpc_error(original_id, -32000, "The browser is unavailable")
-        }
-        Err(RecvTimeoutError::Disconnected) => {
-            pending.lock().unwrap().remove(&correlation);
-            bridge::rpc_error(original_id, -32000, "The browser is unavailable")
+            rpc_error(original_id, -32000, "The browser is unavailable")
         }
     }
 }
 
-fn write_rpc_response(stream: &mut UnixStream, body: &[u8]) -> io::Result<()> {
-    stream.write_all(body)?;
-    stream.write_all(b"\n")
+fn rpc_error(id: impl Into<Value>, code: i64, message: &str) -> Vec<u8> {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id.into(),
+        "error": { "code": code, "message": message }
+    })
+    .to_string()
+    .into_bytes()
 }
 
-fn read_native_message(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
+fn write_rpc_response(stream: &mut UnixStream, body: &[u8]) -> Result<()> {
+    stream.write_all(body)?;
+    stream.write_all(b"\n")?;
+    Ok(())
+}
+
+fn read_native_message(input: &mut impl Read) -> Result<Option<Vec<u8>>> {
     let mut header = [0_u8; 4];
     if input.read(&mut header[..1])? == 0 {
         return Ok(None);
@@ -173,23 +218,54 @@ fn read_native_message(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
     Ok(Some(body))
 }
 
-fn write_native_message(output: &mut impl Write, body: &[u8]) -> io::Result<()> {
-    let length = u32::try_from(body.len())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Native message is too large"))?;
+fn write_native_message(output: &mut impl Write, body: &[u8]) -> Result<()> {
+    let length = u32::try_from(body.len()).context("Native message is too large")?;
     output.write_all(&length.to_ne_bytes())?;
     output.write_all(body)?;
-    output.flush()
+    output.flush()?;
+    Ok(())
 }
 
-fn remove_stale_socket(path: &Path) -> io::Result<()> {
+fn bind_instance_socket(path: &Path) -> Result<UnixListener> {
+    if let Some(parent) = path.parent() {
+        match fs::create_dir(parent) {
+            Ok(()) => fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let metadata = fs::metadata(parent)?;
+                if !metadata.is_dir() || metadata.uid() != bridge::user_id() {
+                    bail!(
+                        "Tab Control socket directory {} is not usable",
+                        parent.display()
+                    );
+                }
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    if path.exists() {
+        match UnixStream::connect(path) {
+            Ok(_) => bail!("Tab Control socket {} is already in use", path.display()),
+            Err(_) => remove_stale_socket(path)?,
+        }
+    }
+
+    let listener = UnixListener::bind(path)
+        .with_context(|| format!("Tab Control socket {} error", path.display()))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(listener)
+}
+
+fn remove_stale_socket(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_socket() => fs::remove_file(path),
-        Ok(_) => Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("Refusing to replace non-socket path {}", path.display()),
-        )),
+        Ok(metadata) if metadata.file_type().is_socket() => {
+            fs::remove_file(path)?;
+            Ok(())
+        }
+        Ok(_) => bail!("Refusing to replace non-socket path {}", path.display()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+        Err(error) => Err(error.into()),
     }
 }
 

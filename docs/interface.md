@@ -59,9 +59,6 @@ the identity. It does not replace another instance's socket. If the path
 exists, it probes: a live peer means this instance is already up and this
 host exits; a dead socket is unlinked, then this host binds.
 
-`$TAB_CONTROL_SOCKET`, when set, is an exact socket path. Discovery and
-`--instance` are not used.
-
 The extension holds `runtime.connectNative()` for the browser session. That
 open native Port is what keeps the Firefox event page and the Chromium
 service worker from unloading while the browser is idle. On
@@ -72,31 +69,37 @@ outlive the browser process.
 ### `tabctl instances`
 
 The command lists live instances. It reads the socket directory, probes each
-socket with `describe`, unlinks a dead socket, and writes one JSON object to
-standard output: instance id to discovery name.
+socket with `describe`, unlinks a dead socket, and writes one JSON array to
+standard output.
 
 ```json
-{
-  "945f84ab-1234-4000-8000-000000000001": "Firefox 945f84",
-  "a1b2c3de-5678-4000-8000-000000000002": "Chrome a1b2c3"
-}
+[
+  {
+    "id": "945f84ab-1234-4000-8000-000000000001",
+    "name": "Firefox 945f84"
+  },
+  {
+    "id": "a1b2c3de-5678-4000-8000-000000000002",
+    "name": "Chrome a1b2c3"
+  }
+]
 ```
 
-The discovery name is the `browser` string from `describe`, a space, then the
-first six characters of the instance id. The socket file name is the full id.
+`id` is the full instance UUID. That is also the socket file name.
+`name` is the `browser` string from `describe`, a space, then the first six
+characters of `id`.
+
+`--instance` accepts the full `id` or a unique prefix of it, like a Docker
+container id. Zero matches or two or more matches: the command fails.
 
 ### `tabctl rpc`
 
-With `$TAB_CONTROL_SOCKET` set, the command connects to that path.
-
-Otherwise:
-
-- `--instance <instanceId>` connects to that instance's socket. If it is not
-  live, the command fails.
+- `--instance <id>` connects to that instance's socket (full id or unique
+  prefix). If it is not live, the command fails.
 - no `--instance` and zero live instances: the command fails
 - no `--instance` and one live instance: the command uses that instance
 - no `--instance` and two or more live instances: the command fails, writes
-  the same map as `tabctl instances` to standard error, and does not guess
+  the same array as `tabctl instances` to standard error, and does not guess
 
 ### `describe`
 

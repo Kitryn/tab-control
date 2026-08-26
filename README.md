@@ -32,9 +32,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{}}' \
   | dist/tabctl rpc
 ```
 
-`$TAB_CONTROL_SOCKET`, when set, is an exact socket path. Otherwise the host
-binds `/run/user/<uid>/tab-control/<instanceId>.sock` when that runtime
-directory exists and is owned by the current user, or
+The host binds `/run/user/<uid>/tab-control/<instanceId>.sock` when that
+runtime directory exists and is owned by the current user, or
 `/tmp/tab-control-<uid>/<instanceId>.sock`. `tabctl instances` lists live
 instances. `tabctl rpc` uses the only live instance, or `--instance <id>`
 when more than one is live. See [docs/interface.md](docs/interface.md)

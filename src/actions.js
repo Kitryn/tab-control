@@ -4,8 +4,8 @@ export function validate(state, actions) {
   }
 
   const tabs = new Set();
-  for (const window of state.windows ?? []) {
-    for (const tab of window.tabs ?? []) {
+  for (const window of state.windows) {
+    for (const tab of window.tabs) {
       if (typeof tab.id === "number") tabs.add(tab.id);
     }
   }
@@ -46,14 +46,6 @@ export async function execute(api, plan) {
   for (let index = 0; index < plan.length; index += 1) {
     const step = plan[index];
     try {
-      if (!api.tabs?.remove) {
-        results.push({
-          index,
-          ok: false,
-          error: { code: "UNSUPPORTED_OPERATION", message: "tabs.remove is missing" }
-        });
-        return { results, failed: true };
-      }
       await api.tabs.remove(step.tabIds);
       results.push({ index, ok: true });
     } catch (error) {

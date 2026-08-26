@@ -1,9 +1,13 @@
 import { createInventory } from "./inventory.js";
 import { createChange } from "./change.js";
+import { loadInstance } from "./instance.js";
 
 const extensionApi = globalThis.browser ?? globalThis.chrome;
 const inventory = createInventory(extensionApi);
 const change = createChange(extensionApi, inventory);
+
+let instance = null;
+let reconnectTimer = 0;
 
 export async function handleRequest(request) {
   if (!request || request.jsonrpc !== "2.0") {
@@ -54,16 +58,34 @@ function errorResponse(id, code, message, data) {
   return { jsonrpc: "2.0", id, error };
 }
 
-const nativePort = extensionApi.runtime.connectNative("com.tab_control.bridge");
+function connectBridge() {
+  const started = Date.now();
+  const port = extensionApi.runtime.connectNative("com.tab_control.bridge");
+  port.onMessage.addListener(async (request) => {
+    port.postMessage(await handleRequest(request));
+  });
+  port.onDisconnect.addListener(() => {
+    const message = extensionApi.runtime.lastError?.message
+      ?? "Tab Control native bridge disconnected";
+    console.error(message);
+    if (
+      message === "Specified native messaging host not found."
+      || message === "Access to the specified native messaging host is forbidden."
+      || message.startsWith("No such native application")
+    ) {
+      return;
+    }
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectBridge, Math.max(0, 1000 - (Date.now() - started)));
+  });
+  port.postMessage({
+    instanceId: instance.instanceId,
+    browser: instance.browser
+  });
+}
 
-nativePort.onMessage.addListener(async (request) => {
-  nativePort.postMessage(await handleRequest(request));
-});
-
-nativePort.onDisconnect.addListener(() => {
-  const error = extensionApi.runtime.lastError;
-  console.error(error?.message ?? "Tab Control native bridge disconnected");
-});
+instance = await loadInstance(extensionApi);
+connectBridge();
 
 extensionApi.runtime.onInstalled.addListener(() => {
   console.info("Tab Control installed");

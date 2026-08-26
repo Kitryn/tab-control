@@ -18,19 +18,17 @@ Full message shapes are in [docs/interface.md](../../../docs/interface.md).
 ```sh
 tabctl instances
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{}}' \
-  | tabctl rpc --instance <instanceId>
+  | tabctl rpc --instance 945f84
 ```
 
-`tabctl instances` writes a JSON object: instance id to a name like
-`Firefox 945f84`. Use that id with `--instance` on every later `tabctl rpc`.
-If exactly one instance is live, `--instance` may be omitted.
+`tabctl instances` writes a JSON array of `{ "id", "name" }`. `name` looks
+like `Firefox 945f84`. Copy a **short unique prefix** of `id` into
+`--instance` (Docker-style). Do not paste the full UUID. Six characters is
+enough when it is unique. If exactly one instance is live, omit `--instance`.
 
 One JSON-RPC 2.0 object on one line to `tabctl rpc` on standard input. One
 JSON-RPC object on standard output. Pretty-printed JSON is rejected. Each
 process call is one request.
-
-This build still binds a single `tab-control.sock` (or `$TAB_CONTROL_SOCKET`).
-Until `tabctl instances` exists, call `tabctl rpc` with no `--instance`.
 
 ## Methods that work now
 
@@ -43,9 +41,9 @@ Until `tabctl instances` exists, call `tabctl rpc` with no `--instance`.
 
 ## How to compose
 
-1. Call `tabctl instances`. If more than one instance, pick one and pass
-   `--instance` on every `tabctl rpc`. Do not merge inventories. IDs from
-   one instance are invalid on another.
+1. Call `tabctl instances`. If more than one instance, pick one and pass a
+   short unique `--instance` prefix on every `tabctl rpc`. Do not merge
+   inventories. IDs from one instance are invalid on another.
 2. Call `get` on that instance.
 3. Decide the change from the inventory. Keep the `revision`.
 4. Call `apply` with that `revision`, a `description` that tells the user
