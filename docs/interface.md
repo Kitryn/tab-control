@@ -344,6 +344,7 @@ until undo work.
       {
         "type": "group",
         "tabIds": [17, 24],
+        "windowId": 1,
         "title": "Documentation",
         "color": "blue",
         "collapsed": false
@@ -492,6 +493,7 @@ Create a group:
 {
   "type": "group",
   "tabIds": [17, 24],
+  "windowId": 1,
   "title": "Documentation",
   "color": "blue",
   "collapsed": false
@@ -511,11 +513,21 @@ Move tabs into an existing group:
 Use one group form in each action: numeric `groupId` from `get`, or the new
 group properties. There is no `groupId: null` meaning “last created group.”
 
-All tabs must be in one window. For an existing group, all tabs must be in the
-same window as the group.
+The create form accepts an optional numeric `windowId`. It maps to
+`createProperties.windowId`. If it is omitted, the browser uses its current
+window. `windowId: null` is invalid. The existing-group form does not accept
+`windowId`; the existing group selects the target window.
 
-Create uses `tabs.group({ tabIds })` then `tabGroups.update` for title, color,
-and collapsed. Join-existing uses `tabs.group({ tabIds, groupId })`.
+Tabs can come from different windows. The browser moves them to the target
+window, unpins them when necessary, makes them adjacent, and groups them.
+Validation accounts for those state changes when it validates later actions
+in the same list. Private-window boundaries and browser-specific placement
+behavior follow the current browser.
+
+Create uses `tabs.group({ tabIds, createProperties: { windowId } })` when
+`windowId` is present, or `tabs.group({ tabIds })` when it is omitted. It then
+uses `tabGroups.update` for title, color, and collapsed. Join-existing uses
+`tabs.group({ tabIds, groupId })`.
 
 Create requires `tabGroups.query`. If that method is missing, create fails
 with `-32003` even if `tabs.group` exists. Otherwise `get` would return
@@ -524,8 +536,8 @@ present.
 
 If `tabs.group` is missing, both group forms fail with `-32003`.
 
-Create uses `tabIds`, so `move` then create-`group` can share one `apply` when
-create is supported. Join-existing needs a `groupId` from `get`.
+A preceding `move` is not required. Grouping itself can move tabs between
+windows. Join-existing needs a `groupId` from `get`.
 
 ### 7.4 `ungroup`
 
