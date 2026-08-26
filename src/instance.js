@@ -31,22 +31,20 @@ async function browserName(api) {
 
   const brands = navigator.userAgentData?.brands;
   if (Array.isArray(brands)) {
-    for (const entry of brands) {
-      const brand = entry?.brand;
-      if (brand === "Google Chrome") return "Chrome";
-      if (brand === "Microsoft Edge") return "Edge";
-      if (brand === "Brave" || brand === "Opera" || brand === "Vivaldi") {
-        return brand;
-      }
-    }
-    if (brands.some((entry) => entry?.brand === "Chromium")) {
-      return "Chromium";
-    }
+    const names = new Set(brands.map((entry) => entry?.brand).filter(Boolean));
+    if (names.has("Brave")) return "Brave";
+    if (names.has("Microsoft Edge")) return "Edge";
+    if (names.has("Opera")) return "Opera";
+    if (names.has("Vivaldi")) return "Vivaldi";
+    if (names.has("Google Chrome")) return "Chrome";
+    if (names.has("Chromium")) return "Chromium";
   }
 
   const userAgent = navigator.userAgent;
   if (userAgent.includes("Firefox/")) return "Firefox";
   if (userAgent.includes("Edg/")) return "Edge";
+  if (userAgent.includes("OPR/") || userAgent.includes("Opera/")) return "Opera";
+  if (userAgent.includes("Brave/")) return "Brave";
   if (userAgent.includes("Chrome/")) return "Chrome";
   return "Chromium";
 }

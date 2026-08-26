@@ -32,3 +32,61 @@ test("loadInstance reuses storage.local and mints once", async () => {
   assert.notEqual(reminted.instanceId, "not-a-uuid");
   assert.equal(stored.instanceId, reminted.instanceId);
 });
+
+function storageApi() {
+  const stored = {};
+  return {
+    api: {
+      storage: {
+        local: {
+          get: async (key) => (key in stored ? { [key]: stored[key] } : {}),
+          set: async (values) => Object.assign(stored, values)
+        }
+      },
+      runtime: {}
+    }
+  };
+}
+
+function withBrands(brands, run) {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "userAgentData");
+  Object.defineProperty(navigator, "userAgentData", {
+    configurable: true,
+    value: { brands }
+  });
+  return Promise.resolve()
+    .then(run)
+    .finally(() => {
+      if (previous) Object.defineProperty(navigator, "userAgentData", previous);
+      else delete navigator.userAgentData;
+    });
+}
+
+test("browserName prefers Brave over Google Chrome in brands", async () => {
+  await withBrands(
+    [
+      { brand: "Not A Brand", version: "99" },
+      { brand: "Google Chrome", version: "120" },
+      { brand: "Chromium", version: "120" },
+      { brand: "Brave", version: "120" }
+    ],
+    async () => {
+      const { api } = storageApi();
+      assert.equal((await loadInstance(api)).browser, "Brave");
+    }
+  );
+});
+
+test("browserName uses Google Chrome when that is the product brand", async () => {
+  await withBrands(
+    [
+      { brand: "Not A Brand", version: "99" },
+      { brand: "Chromium", version: "120" },
+      { brand: "Google Chrome", version: "120" }
+    ],
+    async () => {
+      const { api } = storageApi();
+      assert.equal((await loadInstance(api)).browser, "Chrome");
+    }
+  );
+});
