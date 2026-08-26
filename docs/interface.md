@@ -440,10 +440,10 @@ browser may be mid-change.
 
 ## 7. Actions
 
-`move` and `open` take `windowId`. A number is a window from the
-inventory (including windows earlier actions in this list already used).
-`null` means the window created by the nearest preceding `newWindow` in this
-`actions` list. `null` is not the focused window.
+`move`, `open`, and the create form of `group` take `windowId`. A number is a
+window from the inventory (including windows earlier actions in this list
+already used). `null` means the window created by the nearest preceding
+`newWindow` in this `actions` list. `null` is not the focused window.
 
 If `windowId` is `null` and no `newWindow` precedes this action, validation
 fails. After a second `newWindow`, `null` binds to that later window. An
@@ -522,10 +522,11 @@ Move tabs into an existing group:
 Use one group form in each action: numeric `groupId` from `get`, or the new
 group properties. There is no `groupId: null` meaning “last created group.”
 
-The create form accepts an optional numeric `windowId`. It maps to
-`createProperties.windowId`. If it is omitted, the browser uses its current
-window. `windowId: null` is invalid. The existing-group form does not accept
-`windowId`; the existing group selects the target window.
+The create form accepts an optional numeric or `null` `windowId`. A number
+maps to `createProperties.windowId`. `null` binds to the nearest preceding
+`newWindow` in the action list. If `windowId` is omitted, the browser uses its
+current window. The existing-group form does not accept `windowId`; the
+existing group selects the target window.
 
 Tabs can come from different windows. The browser moves them to the target
 window, unpins them when necessary, makes them adjacent, and groups them.
@@ -616,6 +617,11 @@ Firefox accepts `containerId`. Chromium accepts `null`. The `open` action
 accepts fully qualified HTTP or HTTPS URLs. Agents never send `data:` or
 `about:blank` as `open` targets.
 
+`openerTabId` is best effort. The tab must exist when the action is validated.
+Immediately before creation, the extension uses it only when the opener is
+still in the target window. Otherwise it omits `openerTabId`; the new tab is
+still created.
+
 The extension creates tabs in input order. A numeric `index` is the position
 of the first tab; later tabs follow it. `-1` appends them. The result contains
 each created tab's `id`, `windowId`, and final `index`.
@@ -654,13 +660,16 @@ Create a normal window and move tabs into it:
 ```
 
 The action calls `windows.create` and moves the listed tabs into that window
-with `tabs.move`. The action result contains the new window ID. Later `move`
-and `open` actions in this list target that window with `windowId: null`. They
-cannot name the new numeric id until a later `get`.
+with `tabs.move`. The action result contains the new window ID. If creation
+succeeds but the move fails, the failed result still contains that ID. Later
+`move`, `open`, and create-`group` actions in this list target that window with
+`windowId: null`. They cannot name the new numeric id until a later `get`.
 
-The `newWindow` action accepts tabs from standard windows. The browser may
-also create its usual extra New Tab in that window. The extension does not
-close it. The next `get` shows it.
+The action does not require the source window IDs of its tabs. Browser rules
+for private-window boundaries and tab placement apply. As with `move`, an
+empty successful `tabs.move` result is a browser no-op and does not fail the
+action. The browser may also create its usual extra New Tab in that window.
+The extension does not close it. The next `get` shows the actual state.
 
 ### 7.8 `closeWindow`
 

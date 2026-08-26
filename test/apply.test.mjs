@@ -46,6 +46,152 @@ test("move validation accepts a live window and rejects a missing one", async ()
   );
 });
 
+test("newWindow validation binds later null window targets", async () => {
+  const api = mockApi();
+  const state = await createInventory(api).get();
+  const newWindow = { type: "newWindow", tabIds: [7], focused: false };
+  const move = { type: "move", tabIds: [7], windowId: null, index: -1 };
+  const open = {
+    type: "open",
+    windowId: null,
+    index: -1,
+    tabs: [{
+      url: "https://example.com/docs",
+      title: "Docs",
+      pinned: false,
+      containerId: null,
+      openerTabId: 7
+    }]
+  };
+
+  assert.deepEqual(validate(state, [newWindow, move, open], firefoxPlatform).plan, [
+    newWindow,
+    move,
+    open
+  ]);
+  assert.equal(validate(state, [move], firefoxPlatform).error.code, -32602);
+});
+
+test("newWindow validation does not require the tabs' source windows", async () => {
+  const api = mockApi();
+  const original = api.windows.value[0].tabs[0];
+  api.windows.value.push({
+    id: 2,
+    focused: false,
+    incognito: true,
+    type: "normal",
+    state: "normal",
+    tabs: [{ ...original, id: 9, openerTabId: null }]
+  });
+  const state = await createInventory(api).get();
+  const action = { type: "newWindow", tabIds: [7, 9], focused: false };
+
+  assert.deepEqual(validate(state, [action], firefoxPlatform).plan, [action]);
+});
+
+test("apply creates a window and binds later null targets to it", async () => {
+  const api = mockApi();
+  const createdWith = [];
+  api.windows.create = async (properties) => {
+    createdWith.push(properties);
+    return { id: 2 };
+  };
+  api.tabs.move = async (tabIds, properties) => {
+    api.tabs.moved.push({ tabIds, ...properties });
+    return tabIds.map((id, offset) => ({
+      id,
+      windowId: properties.windowId,
+      index: properties.index === -1 ? offset : properties.index + offset
+    }));
+  };
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Create a window and place the example tab in it",
+    actions: [
+      { type: "newWindow", tabIds: [7], focused: false },
+      { type: "move", tabIds: [7], windowId: null, index: 0 }
+    ]
+  });
+  end();
+
+  assert.deepEqual(createdWith, [{ focused: false }]);
+  assert.deepEqual(api.tabs.moved, [
+    { tabIds: [7], windowId: 2, index: -1 },
+    { tabIds: [7], windowId: 2, index: 0 }
+  ]);
+  assert.deepEqual(outcome.result.actions, [
+    { index: 0, ok: true, windowId: 2 },
+    { index: 1, ok: true, tabs: [{ id: 7, windowId: 2, index: 0 }] }
+  ]);
+});
+
+test("newWindow treats a browser move no-op as success", async () => {
+  const api = mockApi();
+  api.windows.create = async () => ({ id: 2 });
+  api.tabs.move = async () => [];
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Create a window",
+    actions: [{ type: "newWindow", tabIds: [7], focused: false }]
+  });
+  end();
+
+  assert.equal(outcome.result.complete, true);
+  assert.deepEqual(outcome.result.actions, [{ index: 0, ok: true, windowId: 2 }]);
+});
+
+test("failed window creation does not report a window ID", async () => {
+  const api = mockApi();
+  api.windows.create = async () => {
+    throw new Error("Window creation failed");
+  };
+
+  const outcome = await execute(api, [
+    { type: "newWindow", tabIds: [7], focused: false }
+  ], chromiumPlatform);
+
+  assert.deepEqual(outcome.results, [{
+    index: 0,
+    ok: false,
+    error: { code: "BROWSER_REJECTED", message: "Window creation failed" }
+  }]);
+});
+
+test("failed newWindow reports a window that was already created and stops", async () => {
+  const api = mockApi();
+  api.windows.create = async () => ({ id: 2 });
+  api.tabs.move = async () => {
+    throw new Error("Tabs cannot be moved to the new window");
+  };
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Create a window",
+    actions: [
+      { type: "newWindow", tabIds: [7], focused: true },
+      { type: "close", tabIds: [7] }
+    ]
+  });
+  end();
+
+  assert.equal(outcome.result.complete, false);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: false,
+    windowId: 2,
+    error: {
+      code: "BROWSER_REJECTED",
+      message: "Tabs cannot be moved to the new window"
+    }
+  }]);
+  assert.deepEqual(api.tabs.removed, []);
+});
+
 test("apply closes tabs when the revision matches", async () => {
   const api = mockApi();
   const change = createChange(api, createInventory(api), chromiumPlatform);
@@ -186,9 +332,37 @@ test("open validation accepts HTTP tabs and rejects invalid targets", async () =
   }], firefoxPlatform).error.code, -32002);
 });
 
+test("open omits an opener from a different window", async () => {
+  const api = mockApi();
+  api.tabs.created = [];
+  api.tabs.get = async (id) => id === 7
+    ? { id: 7, windowId: 1, index: 0 }
+    : { id, windowId: 2, index: 0 };
+  api.tabs.create = async (properties) => {
+    api.tabs.created.push(properties);
+    return { id: 31, windowId: 2, index: 0 };
+  };
+
+  const outcome = await execute(api, [{
+    type: "open",
+    windowId: 2,
+    index: -1,
+    tabs: [{
+      url: "https://example.com/",
+      title: "Example",
+      pinned: false,
+      containerId: null,
+      openerTabId: 7
+    }]
+  }], firefoxPlatform);
+
+  assert.equal(outcome.failed, false);
+  assert.equal("openerTabId" in api.tabs.created[0], false);
+});
+
 test("open uses discarded Firefox tabs and pins them after creation", async () => {
   const api = mockApi();
-  const nativeTabs = new Map();
+  const nativeTabs = new Map([[7, { id: 7, windowId: 1, index: 0 }]]);
   api.tabs.created = [];
   api.tabs.updated = [];
   api.tabs.create = async (properties) => {

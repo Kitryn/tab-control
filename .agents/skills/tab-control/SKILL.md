@@ -35,7 +35,7 @@ process call is one request.
 | Method | Use |
 | --- | --- |
 | `get` | Read all windows, tabs, containers, and groups. The result includes `revision`. |
-| `apply` | Run an ordered action list. Implemented actions: `close`, `move`, `open`. |
+| `apply` | Run an ordered action list. Implemented actions: `close`, `move`, `open`, `newWindow`. |
 
 `undo` is in the interface. The extension has no `undo` implementation yet.
 
@@ -103,11 +103,28 @@ Put only the tab IDs that the user named, or that the plan selected, in
 ```
 
 `windowId` is a window id from `get`. `index` `-1` means the end of that
-window. `windowId` `null` is not implemented yet (`newWindow` bind). The
-result has `complete: true` when all actions succeed and `complete: false`
-when execution stops on a failed action. The result `actions[].tabs` is what
+window. After a `newWindow` action, `windowId: null` means the window created
+by the nearest preceding `newWindow` in the same action list. The result has
+`complete: true` when all actions succeed and `complete: false` when execution
+stops on a failed action. The result `actions[].tabs` is what
 `tabs.move` actually moved (`id`, `windowId`, `index`). Empty `tabs` with
 `ok: true` is a browser no-op, not a failure.
+
+## `newWindow`
+
+```json
+{
+  "type": "newWindow",
+  "tabIds": [17, 24],
+  "focused": false
+}
+```
+
+`newWindow` creates a standard window and asks the browser to move the listed
+tabs into it. It does not require their source window IDs. Its result contains
+`windowId`. An empty successful browser move is a no-op. Later `move` and
+`open` actions in the same list can use `windowId: null` to target the new
+window. A second `newWindow` changes that binding to the later window.
 
 ## `open`
 
@@ -129,8 +146,9 @@ when execution stops on a failed action. The result `actions[].tabs` is what
 `open` accepts absolute HTTP and HTTPS URLs. It creates inactive tabs without
 loading the target websites. Firefox accepts a container ID from `get`;
 Chromium requires `containerId: null`. A numeric `index` places the first tab,
-and `-1` appends all tabs. If part of the action fails, its result lists tabs
-that were already created. Call `get` before making a new plan.
+and `-1` appends all tabs. `openerTabId` is best effort and is omitted when the
+opener is not in the target window. If part of the action fails, its result
+lists tabs that were already created. Call `get` before making a new plan.
 
 ## Errors that change the plan
 

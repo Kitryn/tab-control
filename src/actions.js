@@ -5,17 +5,18 @@ export function validate(state, actions, platform) {
     return { error: { code: -32602, message: "Invalid parameters" } };
   }
 
-  const tabs = new Map();
+  const tabs = new Set();
   const windows = new Set();
   const containers = new Set((state.containers ?? []).map((container) => container.id));
   for (const window of state.windows) {
     if (typeof window.id === "number") windows.add(window.id);
     for (const tab of window.tabs) {
-      if (typeof tab.id === "number") tabs.set(tab.id, window.id);
+      if (typeof tab.id === "number") tabs.add(tab.id);
     }
   }
 
   const plan = [];
+  let hasNewWindow = false;
   for (const action of actions) {
     if (!action || typeof action !== "object") {
       return { error: { code: -32602, message: "Invalid parameters" } };
@@ -29,15 +30,27 @@ export function validate(state, actions, platform) {
       continue;
     }
 
+    if (action.type === "newWindow") {
+      const tabIds = requireTabIds(action.tabIds, tabs);
+      if (tabIds.error) return tabIds;
+      if (typeof action.focused !== "boolean") return invalidParameters();
+
+      hasNewWindow = true;
+      plan.push({ type: "newWindow", tabIds, focused: action.focused });
+      continue;
+    }
+
     if (action.type === "move") {
       const tabIds = requireTabIds(action.tabIds, tabs);
       if (tabIds.error) return tabIds;
-      if (!Number.isInteger(action.windowId)
+      if ((action.windowId !== null && !Number.isInteger(action.windowId))
         || !Number.isInteger(action.index) || action.index < -1) {
         return invalidParameters();
       }
-      if (!windows.has(action.windowId)) return missingWindow(action.windowId);
-      for (const tabId of tabIds) tabs.set(tabId, action.windowId);
+      if (action.windowId === null && !hasNewWindow) return invalidParameters();
+      if (action.windowId !== null && !windows.has(action.windowId)) {
+        return missingWindow(action.windowId);
+      }
       plan.push({
         type: "move",
         tabIds,
@@ -48,18 +61,20 @@ export function validate(state, actions, platform) {
     }
 
     if (action.type === "open") {
-      if (!Number.isInteger(action.windowId)
+      if ((action.windowId !== null && !Number.isInteger(action.windowId))
         || !Number.isInteger(action.index) || action.index < -1
         || !Array.isArray(action.tabs) || action.tabs.length === 0) {
         return invalidParameters();
       }
-      if (!windows.has(action.windowId)) return missingWindow(action.windowId);
+      if (action.windowId === null && !hasNewWindow) return invalidParameters();
+      if (action.windowId !== null && !windows.has(action.windowId)) {
+        return missingWindow(action.windowId);
+      }
 
       const specifications = [];
       for (const specification of action.tabs) {
         const validated = validateOpenTab(
           specification,
-          action.windowId,
           tabs,
           containers,
           platform
@@ -82,7 +97,7 @@ export function validate(state, actions, platform) {
   return { plan };
 }
 
-function validateOpenTab(tab, windowId, tabs, containers, platform) {
+function validateOpenTab(tab, tabs, containers, platform) {
   if (!tab || typeof tab !== "object" || typeof tab.url !== "string"
     || typeof tab.title !== "string" || typeof tab.pinned !== "boolean"
     || (tab.containerId !== null && typeof tab.containerId !== "string")
@@ -117,7 +132,6 @@ function validateOpenTab(tab, windowId, tabs, containers, platform) {
         }
       };
     }
-    if (tabs.get(tab.openerTabId) !== windowId) return invalidParameters();
   }
 
   return {
@@ -162,12 +176,26 @@ function requireTabIds(tabIds, tabs) {
 
 export async function execute(api, plan, platform) {
   const results = [];
+  let lastNewWindowId = null;
   for (let index = 0; index < plan.length; index += 1) {
     const step = plan[index];
     try {
+      if (step.type === "newWindow") {
+        const created = await executeNewWindow(api, step);
+        const result = { index, ok: !created.error };
+        if (created.windowId !== null) result.windowId = created.windowId;
+        if (created.error) {
+          result.error = nativeFailure(created.error);
+          results.push(result);
+          return { results, failed: true };
+        }
+        lastNewWindowId = created.windowId;
+        results.push(result);
+        continue;
+      }
       if (step.type === "move") {
         const moved = await api.tabs.move(step.tabIds, {
-          windowId: step.windowId,
+          windowId: step.windowId ?? lastNewWindowId,
           index: step.index
         });
         const list = Array.isArray(moved) ? moved : [moved];
@@ -175,7 +203,10 @@ export async function execute(api, plan, platform) {
         continue;
       }
       if (step.type === "open") {
-        const opened = await executeOpen(api, step, platform);
+        const opened = await executeOpen(api, {
+          ...step,
+          windowId: step.windowId ?? lastNewWindowId
+        }, platform);
         const result = { index, ok: !opened.error, tabs: opened.tabs };
         if (opened.error) {
           result.error = nativeFailure(opened.error);
@@ -211,6 +242,18 @@ export async function execute(api, plan, platform) {
   return { results, failed: false };
 }
 
+async function executeNewWindow(api, step) {
+  let windowId = null;
+  try {
+    const created = await api.windows.create({ focused: step.focused });
+    windowId = created?.id ?? null;
+    await api.tabs.move(step.tabIds, { windowId, index: -1 });
+    return { windowId, error: null };
+  } catch (error) {
+    return { windowId, error };
+  }
+}
+
 async function executeOpen(api, step, platform) {
   const created = [];
   let error = null;
@@ -227,7 +270,14 @@ async function executeOpen(api, step, platform) {
       };
       if (step.index !== -1) properties.index = step.index + offset;
       if (specification.openerTabId !== null) {
-        properties.openerTabId = specification.openerTabId;
+        try {
+          const opener = await api.tabs.get(specification.openerTabId);
+          if (opener.windowId === step.windowId) {
+            properties.openerTabId = specification.openerTabId;
+          }
+        } catch {
+          // Opener relationships are best effort.
+        }
       }
       if (platform.supportsDiscardedCreate) {
         properties.discarded = true;
