@@ -35,7 +35,7 @@ process call is one request.
 | Method | Use |
 | --- | --- |
 | `get` | Read all windows, tabs, and groups. The result includes `revision`. |
-| `apply` | Run an ordered action list. The implemented action is `close`. |
+| `apply` | Run an ordered action list. Implemented actions: `close`, `move`. |
 
 `undo` is in the interface. The extension has no `undo` implementation yet.
 
@@ -75,7 +75,34 @@ restarts. After a restart, call `get` again.
 ```
 
 Put only the tab IDs that the user named, or that the plan selected, in
-`tabIds`. Other action types get `-32003` until the extension adds them.
+`tabIds`. Unimplemented action types get `-32003`.
+
+## `move`
+
+(Pretty printed for informational purposes only - all payloads must be one-line)
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "apply",
+  "params": {
+    "revision": 42,
+    "description": "Move the docs tab next to the other docs",
+    "actions": [{
+      "type": "move",
+      "tabIds": [17, 24],
+      "windowId": 2,
+      "index": 3
+    }]
+  }
+}
+```
+
+`windowId` is a window id from `get`. `index` `-1` means the end of that
+window. `windowId` `null` is not implemented yet (`newWindow` bind). The
+result `actions[].tabs` is what `tabs.move` actually moved (`id`, `windowId`,
+`index`). Empty `tabs` with `ok: true` is a browser no-op, not a failure.
 
 ## Errors that change the plan
 

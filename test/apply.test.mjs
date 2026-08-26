@@ -17,8 +17,29 @@ test("close validation accepts existing tabs and rejects missing ones", async ()
     -32002
   );
   assert.equal(
-    validate(state, [{ type: "move", tabIds: [7], windowId: 1, index: 0 }]).error.code,
+    validate(state, [{ type: "group", tabIds: [7], title: "Docs" }]).error.code,
     -32003
+  );
+});
+
+test("move validation accepts a live window and rejects a missing one", async () => {
+  const api = mockApi();
+  api.windows.value.push({
+    id: 2, focused: false, incognito: false, type: "normal", state: "normal", tabs: []
+  });
+  const state = await createInventory(api).get();
+
+  assert.deepEqual(
+    validate(state, [{ type: "move", tabIds: [7], windowId: 2, index: 0 }]).plan,
+    [{ type: "move", tabIds: [7], windowId: 2, index: 0 }]
+  );
+  assert.equal(
+    validate(state, [{ type: "move", tabIds: [7], windowId: 9, index: 0 }]).error.code,
+    -32002
+  );
+  assert.equal(
+    validate(state, [{ type: "move", tabIds: [7], windowId: null, index: 0 }]).error.code,
+    -32602
   );
 });
 
@@ -36,6 +57,76 @@ test("apply closes tabs when the revision matches", async () => {
   assert.equal(outcome.result.changeId, "1");
   assert.deepEqual(outcome.result.actions, [{ index: 0, ok: true }]);
   assert.deepEqual(api.tabs.removed, [7]);
+});
+
+test("apply moves tabs and reports the API positions", async () => {
+  const api = mockApi();
+  api.windows.value.push({
+    id: 2, focused: false, incognito: false, type: "normal", state: "normal", tabs: []
+  });
+  api.tabs.move = async (tabIds, props) => {
+    api.tabs.moved.push({ tabIds, ...props });
+    return tabIds.map((id, offset) => ({
+      id,
+      windowId: props.windowId,
+      index: props.index + offset
+    }));
+  };
+  const change = createChange(api, createInventory(api));
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Move the example tab",
+    actions: [{ type: "move", tabIds: [7], windowId: 2, index: 0 }]
+  });
+  end();
+
+  assert.deepEqual(api.tabs.moved, [{ tabIds: [7], windowId: 2, index: 0 }]);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: true,
+    tabs: [{ id: 7, windowId: 2, index: 0 }]
+  }]);
+});
+
+test("apply treats a move no-op as success with no tabs", async () => {
+  const api = mockApi();
+  api.tabs.move = async () => [];
+  const change = createChange(api, createInventory(api));
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Move into the pinned region",
+    actions: [{ type: "move", tabIds: [7], windowId: 1, index: 0 }]
+  });
+  end();
+
+  assert.deepEqual(outcome.result.actions, [{ index: 0, ok: true, tabs: [] }]);
+});
+
+test("apply stops after a rejected move", async () => {
+  const api = mockApi();
+  api.tabs.move = async () => {
+    throw new Error("No window with id: 2");
+  };
+  const change = createChange(api, createInventory(api));
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Move then close",
+    actions: [
+      { type: "move", tabIds: [7], windowId: 1, index: 0 },
+      { type: "close", tabIds: [7] }
+    ]
+  });
+  end();
+
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: false,
+    error: { code: "WINDOW_NOT_FOUND", message: "No window with id: 2" }
+  }]);
+  assert.deepEqual(api.tabs.removed, []);
 });
 
 test("apply rejects a stale revision", async () => {
@@ -160,6 +251,7 @@ function mockApi() {
   const api = {
     tabs: {
       removed: [],
+      moved: [],
       remove: async (tabIds) => {
         api.tabs.removed.push(...tabIds);
       },
