@@ -27,13 +27,19 @@ The JSON-RPC handler is `handleRequest` in `src/background.js` and accepts
 The CLI is a JSON-RPC transport shim:
 
 ```sh
+tabctl instances
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{}}' \
   | dist/tabctl rpc
 ```
 
-It uses `$TAB_CONTROL_SOCKET` when set. Otherwise it uses
-`/run/user/<uid>/tab-control.sock` when that directory exists and is owned by
-the current user, or `/tmp/tab-control-<uid>.sock`.
+`$TAB_CONTROL_SOCKET`, when set, is an exact socket path. Otherwise the host
+binds `/run/user/<uid>/tab-control/<instanceId>.sock` when that runtime
+directory exists and is owned by the current user, or
+`/tmp/tab-control-<uid>/<instanceId>.sock`. `tabctl instances` lists live
+instances. `tabctl rpc` uses the only live instance, or `--instance <id>`
+when more than one is live. See [docs/interface.md](docs/interface.md)
+section 2.
+
 Firefox and Chromium start `dist/native-host` through Native Messaging. The
 checked-in host manifests are templates. `npm run install-host` writes them
 into the user Native Messaging directories and fills the absolute host path.

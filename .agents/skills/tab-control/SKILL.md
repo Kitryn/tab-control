@@ -15,15 +15,22 @@ Full message shapes are in [docs/interface.md](../../../docs/interface.md).
 
 ## Command
 
-One JSON-RPC 2.0 object on one line. Write the object to `tabctl rpc` on
-standard input. Read one JSON-RPC object from standard output.
-
 ```sh
+tabctl instances
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{}}' \
-  | dist/tabctl rpc
+  | tabctl rpc --instance <instanceId>
 ```
 
-Each process call is one request. Pretty-printed JSON is rejected.
+`tabctl instances` writes a JSON object: instance id to a name like
+`Firefox 945f84`. Use that id with `--instance` on every later `tabctl rpc`.
+If exactly one instance is live, `--instance` may be omitted.
+
+One JSON-RPC 2.0 object on one line to `tabctl rpc` on standard input. One
+JSON-RPC object on standard output. Pretty-printed JSON is rejected. Each
+process call is one request.
+
+This build still binds a single `tab-control.sock` (or `$TAB_CONTROL_SOCKET`).
+Until `tabctl instances` exists, call `tabctl rpc` with no `--instance`.
 
 ## Methods that work now
 
@@ -36,18 +43,21 @@ Each process call is one request. Pretty-printed JSON is rejected.
 
 ## How to compose
 
-1. Call `get`.
-2. Decide the change from the inventory. Keep the `revision`.
-3. Call `apply` with that `revision`, a `description` that tells the user
+1. Call `tabctl instances`. If more than one instance, pick one and pass
+   `--instance` on every `tabctl rpc`. Do not merge inventories. IDs from
+   one instance are invalid on another.
+2. Call `get` on that instance.
+3. Decide the change from the inventory. Keep the `revision`.
+4. Call `apply` with that `revision`, a `description` that tells the user
    why, and one or more actions.
-4. If the response is `-32001`, call `get` again and make a new plan.
-5. If the response is `-32004`, wait, then call `apply` again or call `get`.
+5. If the response is `-32001`, call `get` again and make a new plan.
+6. If the response is `-32004`, wait, then call `apply` again or call `get`.
 
-`get` can run at the same time as another `get`. A `get` that starts during
-`apply` waits and then returns a complete inventory.
+`get` can run at the same time as another `get` on the same instance. A `get`
+that starts during `apply` waits and then returns a complete inventory.
 
-Session tab IDs and window IDs stay valid until the browser restarts. After
-a restart, call `get` again.
+Session tab IDs and window IDs stay valid until that browser profile
+restarts. After a restart, call `get` again.
 
 ## `close`
 
@@ -81,6 +91,7 @@ Put only the tab IDs that the user named, or that the plan selected, in
 
 ## Setup
 
-The browser must run the Tab Control extension. The host must listen. If
-`tabctl` reports a socket error, tell the user to load the extension and
-run `npm run install-host`.
+The browser must run the Tab Control extension. That profile's host must
+listen. If `tabctl` reports a socket error, tell the user to load the
+extension and run `npm run install-host`. If `tabctl rpc` fails because more
+than one instance is live, call `tabctl instances` and pass `--instance`.
