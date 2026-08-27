@@ -430,13 +430,14 @@ The result has `complete: true` when all actions succeed. It has
 includes `index` and `ok`. Actions after the first failed action are not
 attempted and are not included.
 
-When the browser API returns tab or window objects, the result includes those
-ids and positions so the agent can see what actually happened. A successful
-`close` result includes `closedTabIds` in request order and `closedCount`. A
-native no-op is `ok: true` with an empty moved-tab list, not a validation error. The
-extension does not rewrite browser-specific `tabs.move` behavior (pinned
-regions, split views). Those follow the current browser. Ambiguous cases belong
-in the agent skill as a pointer to MDN or Chrome docs, not as extra RPC rules.
+A successful `move` result contains `intendedCount`, `movedCount`, `windowId`,
+`firstIndex`, and `lastIndex`. These fields summarize the browser response. A
+successful `close` result contains `closedTabIds` in request order and
+`closedCount`. If `tabs.move` returns an empty array, `movedCount` is `0`, and
+`firstIndex` and `lastIndex` are null. This result identifies a browser move
+no-op. The current browser controls pinned regions, split views, and other
+`tabs.move` behavior. The agent skill gives references to the MDN and Chrome
+documentation for these cases.
 
 ### Successful result
 
@@ -530,10 +531,14 @@ Move tabs to a window and index:
 The extension preserves the order in `tabIds`. An index of `-1` means the end
 of the destination window. Tabs omitted from `tabIds` stay where they are.
 
-This action is `tabs.move`. The result includes the tabs the API moved, with
-each tab's `id`, `windowId`, and `index` after the call. If the browser moves
-none (for example an unpinned tab into the pinned region), the call succeeds
-and `tabs` is `[]`. The extension does not reject that case up front.
+This action calls `tabs.move`. Its result contains `intendedCount`,
+`movedCount`, `windowId`, `firstIndex`, and `lastIndex`. `intendedCount` is the
+number of tab IDs in the request. `movedCount` is the number of tabs in the
+browser response. `windowId` identifies the destination window. `firstIndex`
+and `lastIndex` identify the range of moved tabs. If the browser returns an
+empty array, the call succeeds with `movedCount: 0`, and both indexes are null.
+For example, the browser can return an empty array for a request to move an
+unpinned tab into the pinned region.
 
 There is no whole-window permutation verb. An agent that wants a full strip
 sends one `move` of every tab in that window, or several `move`s.
@@ -866,8 +871,9 @@ message. An internal unsupported plan step uses `UNSUPPORTED_OPERATION`.
 
 The extension reports browser results. It does not invent a second shuffle
 model. `null` means the browser omitted a field; `false` is a Boolean state.
-Split views, pinned-region no-ops, and other `tabs.move` quirks follow the
-current browser. The action result must include what the API moved.
+The current browser controls split views, pinned-region no-ops, and other
+`tabs.move` behavior. The action result gives the intended count and a summary
+of the browser response.
 
 | Area | Firefox | Chromium | RPC rule |
 | --- | --- | --- | --- |

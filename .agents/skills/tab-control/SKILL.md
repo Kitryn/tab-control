@@ -144,9 +144,10 @@ report partial close progress. Unimplemented action types get `-32003`.
 window. After a `newWindow` action, `windowId: null` means the window created
 by the nearest preceding `newWindow` in the same action list. The result has
 `complete: true` when all actions succeed and `complete: false` when execution
-stops on a failed action. The result `actions[].tabs` is what
-`tabs.move` actually moved (`id`, `windowId`, `index`). Empty `tabs` with
-`ok: true` is a browser no-op, not a failure.
+stops on a failed action. A successful move reports `intendedCount`,
+`movedCount`, `windowId`, `firstIndex`, and `lastIndex`. If `tabs.move` returns
+an empty array, `movedCount` is `0`, and `firstIndex` and `lastIndex` are null.
+This successful result identifies a browser move no-op.
 
 ## `newWindow`
 

@@ -123,7 +123,15 @@ test("apply creates a window and binds later null targets to it", async () => {
   ]);
   assert.deepEqual(outcome.result.actions, [
     { index: 0, ok: true, windowId: 2 },
-    { index: 1, ok: true, tabs: [{ id: 7, windowId: 2, index: 0 }] }
+    {
+      index: 1,
+      ok: true,
+      intendedCount: 1,
+      movedCount: 1,
+      windowId: 2,
+      firstIndex: 0,
+      lastIndex: 0
+    }
   ]);
 });
 
@@ -241,8 +249,9 @@ test("a rejected close does not report closed tabs", async () => {
   }]);
 });
 
-test("apply moves tabs and reports the API positions", async () => {
+test("apply summarizes the tabs moved by the API", async () => {
   const api = mockApi();
+  api.windows.value[0].tabs.push({ ...api.windows.value[0].tabs[0], id: 8, index: 1 });
   api.windows.value.push({
     id: 2, focused: false, incognito: false, type: "normal", state: "normal", tabs: []
   });
@@ -258,20 +267,24 @@ test("apply moves tabs and reports the API positions", async () => {
   const end = change.begin();
   const outcome = await change.apply({
     revision: 1,
-    description: "Move the example tab",
-    actions: [{ type: "move", tabIds: [7], windowId: 2, index: 0 }]
+    description: "Move the example tabs",
+    actions: [{ type: "move", tabIds: [7, 8], windowId: 2, index: 3 }]
   });
   end();
 
-  assert.deepEqual(api.tabs.moved, [{ tabIds: [7], windowId: 2, index: 0 }]);
+  assert.deepEqual(api.tabs.moved, [{ tabIds: [7, 8], windowId: 2, index: 3 }]);
   assert.deepEqual(outcome.result.actions, [{
     index: 0,
     ok: true,
-    tabs: [{ id: 7, windowId: 2, index: 0 }]
+    intendedCount: 2,
+    movedCount: 2,
+    windowId: 2,
+    firstIndex: 3,
+    lastIndex: 4
   }]);
 });
 
-test("apply treats a move no-op as success with no tabs", async () => {
+test("apply summarizes a move no-op", async () => {
   const api = mockApi();
   api.tabs.move = async () => [];
   const change = createChange(api, createInventory(api), chromiumPlatform);
@@ -283,7 +296,15 @@ test("apply treats a move no-op as success with no tabs", async () => {
   });
   end();
 
-  assert.deepEqual(outcome.result.actions, [{ index: 0, ok: true, tabs: [] }]);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: true,
+    intendedCount: 1,
+    movedCount: 0,
+    windowId: 1,
+    firstIndex: null,
+    lastIndex: null
+  }]);
 });
 
 test("apply stops after a rejected move", async () => {

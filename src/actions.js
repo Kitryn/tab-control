@@ -194,12 +194,21 @@ export async function execute(api, plan, platform) {
         continue;
       }
       if (step.type === "move") {
+        const windowId = step.windowId ?? lastNewWindowId;
         const moved = await api.tabs.move(step.tabIds, {
-          windowId: step.windowId ?? lastNewWindowId,
+          windowId,
           index: step.index
         });
         const list = Array.isArray(moved) ? moved : [moved];
-        results.push({ index, ok: true, tabs: list.map(tabResult) });
+        results.push({
+          index,
+          ok: true,
+          intendedCount: step.tabIds.length,
+          movedCount: list.length,
+          windowId: list.length === 0 ? windowId : list[0].windowId,
+          firstIndex: list.length === 0 ? null : list[0].index,
+          lastIndex: list.length === 0 ? null : list[list.length - 1].index
+        });
         continue;
       }
       if (step.type === "open") {
