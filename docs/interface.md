@@ -389,12 +389,17 @@ while `apply` or `undo` is running waits for that change to finish.
    fail with `-32001`. This check does not make `apply` atomic.
 2. Fetch a fresh inventory (`windows.getAll({ populate: true })`, groups,
    containers, private-window access). Use that snapshot to validate.
-3. Validate the complete action list against the state that earlier actions
-   in the list will produce, including `windowId: null` binding to the nearest
-   preceding `newWindow`.
+3. Validate action fields and inventory references against that snapshot. For
+   `windowId: null`, also verify that a `newWindow` action comes first in the
+   list.
 4. If validation succeeds, execute the actions in array order. The first
    failed native call ends forward execution. Earlier actions stay applied.
    There is no rollback.
+
+Validation uses only the starting snapshot. The browser controls the state
+changes between actions. Thus, an earlier action can remove a tab or group that
+a later action references. The later action then fails with the browser error.
+Split dependent work into separate `apply` calls, and call `get` between them.
 
 The result `revision` is the revision counter after execution.
 Recovery snapshots, automatic rollback, and change records are deferred
@@ -608,6 +613,9 @@ Move tabs into an existing group:
 
 Use one group form in each action: numeric `groupId` from `get`, or the new
 group properties. There is no `groupId: null` meaning “last created group.”
+The create form requires a string `title`, a Boolean `collapsed`, and one of
+these `color` values: `grey`, `blue`, `red`, `yellow`, `green`, `pink`,
+`purple`, `cyan`, or `orange`.
 
 The create form accepts an optional numeric or `null` `windowId`. A number
 maps to `createProperties.windowId`. `null` binds to the nearest preceding
@@ -617,14 +625,18 @@ existing group selects the target window.
 
 Tabs can come from different windows. The browser moves them to the target
 window, unpins them when necessary, makes them adjacent, and groups them.
-Validation accounts for those state changes when it validates later actions
-in the same list. Private-window boundaries and browser-specific placement
-behavior follow the current browser.
+Snapshot validation checks the starting tab, window, and group IDs. The browser
+controls group membership and placement during execution. If a later action
+depends on the new state, call `get` first and use a separate `apply` request.
+Private-window boundaries and browser-specific placement behavior follow the
+current browser.
 
 Create uses `tabs.group({ tabIds, createProperties: { windowId } })` when
 `windowId` is present, or `tabs.group({ tabIds })` when it is omitted. It then
 uses `tabGroups.update` for title, color, and collapsed. Join-existing uses
-`tabs.group({ tabIds, groupId })`.
+`tabs.group({ tabIds, groupId })`. A successful create or join result contains
+`groupId`. If create succeeds but the metadata update fails, the failed result
+also contains that new `groupId` because the group stays created.
 
 Create requires `tabGroups.query`. If that method is missing, create fails
 with `-32003` even if `tabs.group` exists. Otherwise `get` would return
@@ -883,13 +895,15 @@ Use these application error codes:
 | ---: | --- |
 | `-32000` | The browser is unavailable, or the browser or bridge did not respond. |
 | `-32001` | The browser state changed. The supplied revision is stale. |
-| `-32002` | A tab, window, group, container, or change does not exist. |
+| `-32002` | A starting browser reference or requested change is missing. |
 | `-32003` | The browser does not support the operation. |
 | `-32004` | Another `apply` or `undo` is in progress. This code is not used for concurrent `get` requests. |
 | `-32005` | The change cannot be undone. |
 
 A native action failure uses `BROWSER_REJECTED` and preserves the browser's
-message. An internal unsupported plan step uses `UNSUPPORTED_OPERATION`.
+message. This includes a reference that an earlier action removed after
+snapshot validation. An internal unsupported plan step uses
+`UNSUPPORTED_OPERATION`.
 
 ## 11. Firefox and Chromium differences
 

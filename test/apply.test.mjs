@@ -23,6 +23,13 @@ test("close validation accepts existing tabs and rejects missing ones", async ()
     validate(state, [{ type: "group", tabIds: [7], title: "Docs" }]).error.code,
     -32003
   );
+  assert.deepEqual(validate(state, [
+    { type: "close", tabIds: [7] },
+    { type: "move", tabIds: [7], windowId: 1, index: 0 }
+  ]).plan, [
+    { type: "close", tabIds: [7] },
+    { type: "move", tabIds: [7], windowId: 1, index: 0 }
+  ]);
 });
 
 test("move validation accepts a live window and rejects a missing one", async () => {
@@ -336,7 +343,7 @@ test("apply stops after a rejected move", async () => {
 test("execution rejects an unknown plan step without closing tabs", async () => {
   const api = mockApi();
 
-  const outcome = await execute(api, [{ type: "group", tabIds: [7] }], chromiumPlatform);
+  const outcome = await execute(api, [{ type: "unknown", tabIds: [7] }], chromiumPlatform);
 
   assert.equal(outcome.failed, true);
   assert.deepEqual(api.tabs.removed, []);
@@ -345,9 +352,216 @@ test("execution rejects an unknown plan step without closing tabs", async () => 
     ok: false,
     error: {
       code: "UNSUPPORTED_OPERATION",
-      message: "Unsupported plan step: group"
+      message: "Unsupported plan step: unknown"
     }
   }]);
+});
+
+test("group validation accepts create, join, and ungroup forms", async () => {
+  const api = mockApi();
+  const state = await createInventory(api).get();
+  const create = {
+    type: "group",
+    tabIds: [7],
+    windowId: 1,
+    title: "Docs",
+    color: "blue",
+    collapsed: false
+  };
+
+  assert.deepEqual(validate(state, [create], chromiumPlatform, api).plan, [create]);
+  assert.deepEqual(
+    validate(state, [{ type: "group", tabIds: [7], groupId: 3 }], chromiumPlatform, api).plan,
+    [{ type: "group", tabIds: [7], groupId: 3 }]
+  );
+  assert.deepEqual(
+    validate(state, [{ type: "ungroup", tabIds: [7] }], chromiumPlatform, api).plan,
+    [{ type: "ungroup", tabIds: [7] }]
+  );
+  assert.equal(validate(state, [{ ...create, groupId: 3 }], chromiumPlatform, api).error.code, -32602);
+  assert.equal(validate(state, [{ ...create, color: "black" }], chromiumPlatform, api).error.code, -32602);
+  assert.equal(validate(state, [{ ...create, windowId: 9 }], chromiumPlatform, api).error.code, -32002);
+  assert.equal(validate(state, [{ ...create, windowId: null }], chromiumPlatform, api).error.code, -32602);
+  assert.equal(
+    validate(state, [{ type: "group", tabIds: [7], title: "Docs" }], chromiumPlatform, api).error.code,
+    -32602
+  );
+  assert.equal(
+    validate(state, [{ type: "group", tabIds: [7], groupId: null }], chromiumPlatform, api).error.code,
+    -32602
+  );
+  assert.equal(
+    validate(state, [{ type: "group", tabIds: [7], groupId: 99 }], chromiumPlatform, api).error.code,
+    -32002
+  );
+});
+
+test("group validation uses the initial inventory for every action", async () => {
+  const api = mockApi();
+  const state = await createInventory(api).get();
+  const actions = [
+    { type: "move", tabIds: [7], windowId: 1, index: 0 },
+    { type: "ungroup", tabIds: [7] },
+    { type: "group", tabIds: [7], groupId: 3 }
+  ];
+
+  assert.deepEqual(validate(state, actions, chromiumPlatform, api).plan, actions);
+});
+
+test("a browser can reject a group that an earlier action removed", async () => {
+  const api = mockApi();
+  api.tabs.group = async () => {
+    throw new Error("No group with id: 3.");
+  };
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Reuse a group after its last tab leaves",
+    actions: [
+      { type: "ungroup", tabIds: [7] },
+      { type: "group", tabIds: [7], groupId: 3 },
+      { type: "close", tabIds: [7] }
+    ]
+  });
+  end();
+
+  assert.equal(outcome.result.complete, false);
+  assert.deepEqual(outcome.result.actions, [
+    { index: 0, ok: true },
+    {
+      index: 1,
+      ok: false,
+      error: { code: "BROWSER_REJECTED", message: "No group with id: 3." }
+    }
+  ]);
+  assert.deepEqual(api.tabs.removed, []);
+});
+
+test("a rejected ungroup stops later actions", async () => {
+  const api = mockApi();
+  api.tabs.ungroup = async () => {
+    throw new Error("Tabs cannot be ungrouped");
+  };
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Remove the tab from its group",
+    actions: [
+      { type: "ungroup", tabIds: [7] },
+      { type: "close", tabIds: [7] }
+    ]
+  });
+  end();
+
+  assert.equal(outcome.result.complete, false);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: false,
+    error: { code: "BROWSER_REJECTED", message: "Tabs cannot be ungrouped" }
+  }]);
+  assert.deepEqual(api.tabs.removed, []);
+});
+
+test("group actions require the browser APIs used by each form", async () => {
+  const api = mockApi();
+  const state = await createInventory(api).get();
+  const create = {
+    type: "group", tabIds: [7], title: "Docs", color: "blue", collapsed: false
+  };
+
+  const noGroup = mockApi();
+  delete noGroup.tabs.group;
+  assert.equal(validate(state, [create], chromiumPlatform, noGroup).error.code, -32003);
+
+  const noQuery = mockApi();
+  delete noQuery.tabGroups.query;
+  assert.equal(validate(state, [create], chromiumPlatform, noQuery).error.code, -32003);
+
+  const noUpdate = mockApi();
+  delete noUpdate.tabGroups.update;
+  assert.equal(validate(state, [create], chromiumPlatform, noUpdate).error.code, -32003);
+
+  const noUngroup = mockApi();
+  delete noUngroup.tabs.ungroup;
+  assert.equal(
+    validate(state, [{ type: "ungroup", tabIds: [7] }], chromiumPlatform, noUngroup).error.code,
+    -32003
+  );
+});
+
+test("apply creates, updates, joins, and removes tab groups", async () => {
+  const api = mockApi();
+  api.windows.value[0].tabs.push({ ...api.windows.value[0].tabs[0], id: 8, index: 1, groupId: null });
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Arrange the documentation tabs",
+    actions: [
+      { type: "group", tabIds: [8], title: "New docs", color: "cyan", collapsed: true },
+      { type: "group", tabIds: [7], groupId: 3 },
+      { type: "ungroup", tabIds: [7] }
+    ]
+  });
+  end();
+
+  assert.equal(outcome.result.complete, true);
+  assert.deepEqual(api.tabs.grouped, [
+    { tabIds: [8] },
+    { tabIds: [7], groupId: 3 }
+  ]);
+  assert.deepEqual(api.tabGroups.updated, [{
+    groupId: 9, title: "New docs", color: "cyan", collapsed: true
+  }]);
+  assert.deepEqual(api.tabs.ungrouped, [[7]]);
+  assert.deepEqual(outcome.result.actions, [
+    { index: 0, ok: true, groupId: 9 },
+    { index: 1, ok: true, groupId: 3 },
+    { index: 2, ok: true }
+  ]);
+});
+
+test("create group binds a null window and reports a partial metadata failure", async () => {
+  const api = mockApi();
+  api.windows.create = async () => ({ id: 2 });
+  api.tabs.move = async () => [{ id: 7, windowId: 2, index: 0 }];
+  api.tabGroups.update = async () => {
+    throw new Error("Group metadata update failed");
+  };
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Move and group the documentation tab",
+    actions: [
+      { type: "newWindow", tabIds: [7], focused: false },
+      {
+        type: "group",
+        tabIds: [7],
+        windowId: null,
+        title: "Docs",
+        color: "blue",
+        collapsed: false
+      },
+      { type: "close", tabIds: [7] }
+    ]
+  });
+  end();
+
+  assert.deepEqual(api.tabs.grouped, [{ tabIds: [7], createProperties: { windowId: 2 } }]);
+  assert.equal(outcome.result.complete, false);
+  assert.deepEqual(outcome.result.actions, [
+    { index: 0, ok: true, windowId: 2 },
+    {
+      index: 1,
+      ok: false,
+      groupId: 9,
+      error: { code: "BROWSER_REJECTED", message: "Group metadata update failed" }
+    }
+  ]);
+  assert.deepEqual(api.tabs.removed, []);
 });
 
 test("open validation accepts HTTP tabs and rejects invalid targets", async () => {
@@ -735,8 +949,17 @@ function mockApi() {
     tabs: {
       removed: [],
       moved: [],
+      grouped: [],
+      ungrouped: [],
       remove: async (tabIds) => {
         api.tabs.removed.push(...tabIds);
+      },
+      group: async (options) => {
+        api.tabs.grouped.push(options);
+        return options.groupId ?? 9;
+      },
+      ungroup: async (tabIds) => {
+        api.tabs.ungrouped.push(tabIds);
       },
       onCreated: event(), onUpdated: event(), onMoved: event(),
       onAttached: event(), onDetached: event(), onActivated: event(),
@@ -748,9 +971,13 @@ function mockApi() {
       onCreated: event(), onFocusChanged: event(), onRemoved: event()
     },
     tabGroups: {
+      updated: [],
       query: async () => [{
         id: 3, windowId: 1, title: "Docs", color: "blue", collapsed: false
       }],
+      update: async (groupId, properties) => {
+        api.tabGroups.updated.push({ groupId, ...properties });
+      },
       onCreated: event(), onMoved: event(), onRemoved: event(), onUpdated: event()
     },
     contextualIdentities: {

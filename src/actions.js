@@ -1,12 +1,13 @@
 import { encodePendingOpen } from "./pending-open.js";
 
-export function validate(state, actions, platform) {
+export function validate(state, actions, platform, api) {
   if (!Array.isArray(actions) || actions.length === 0) {
     return { error: { code: -32602, message: "Invalid parameters" } };
   }
 
   const tabs = new Set();
   const windows = new Set();
+  const groups = new Set((state.groups ?? []).map((group) => group.id));
   const containers = new Set((state.containers ?? []).map((container) => container.id));
   for (const window of state.windows) {
     if (typeof window.id === "number") windows.add(window.id);
@@ -25,7 +26,6 @@ export function validate(state, actions, platform) {
     if (action.type === "close") {
       const tabIds = requireTabIds(action.tabIds, tabs);
       if (tabIds.error) return tabIds;
-      for (const tabId of tabIds) tabs.delete(tabId);
       plan.push({ type: "close", tabIds });
       continue;
     }
@@ -91,10 +91,74 @@ export function validate(state, actions, platform) {
       continue;
     }
 
-    return { error: { code: -32003, message: "The browser does not support the operation" } };
+    if (action.type === "group") {
+      const validated = validateGroup(action, tabs, windows, groups, hasNewWindow, api);
+      if (validated.error) return validated;
+      plan.push(validated.step);
+      continue;
+    }
+
+    if (action.type === "ungroup") {
+      const tabIds = requireTabIds(action.tabIds, tabs);
+      if (tabIds.error) return tabIds;
+      if (!api?.tabs?.ungroup) return unsupportedOperation();
+      plan.push({ type: "ungroup", tabIds });
+      continue;
+    }
+
+    return unsupportedOperation();
   }
 
   return { plan };
+}
+
+const GROUP_COLORS = new Set([
+  "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"
+]);
+
+function validateGroup(action, tabs, windows, groups, hasNewWindow, api) {
+  const tabIds = requireTabIds(action.tabIds, tabs);
+  if (tabIds.error) return tabIds;
+  if (!api?.tabs?.group) return unsupportedOperation();
+
+  if (Object.hasOwn(action, "groupId")) {
+    if (!Number.isInteger(action.groupId)
+      || Object.hasOwn(action, "windowId")
+      || Object.hasOwn(action, "title")
+      || Object.hasOwn(action, "color")
+      || Object.hasOwn(action, "collapsed")) {
+      return invalidParameters();
+    }
+    if (!groups.has(action.groupId)) return missingGroup(action.groupId);
+    return { step: { type: "group", tabIds, groupId: action.groupId } };
+  }
+
+  if (!api?.tabGroups?.query || !api?.tabGroups?.update) return unsupportedOperation();
+  if (typeof action.title !== "string"
+    || !GROUP_COLORS.has(action.color)
+    || typeof action.collapsed !== "boolean") {
+    return invalidParameters();
+  }
+
+  if (Object.hasOwn(action, "windowId")) {
+    if (action.windowId === null) {
+      if (!hasNewWindow) return invalidParameters();
+    } else if (!Number.isInteger(action.windowId)) {
+      return invalidParameters();
+    } else if (!windows.has(action.windowId)) {
+      return missingWindow(action.windowId);
+    }
+  }
+
+  const step = {
+    type: "group",
+    tabIds,
+    title: action.title,
+    color: action.color,
+    collapsed: action.collapsed
+  };
+  if (Object.hasOwn(action, "windowId")) step.windowId = action.windowId;
+  return { step };
 }
 
 function validateOpenTab(tab, tabs, containers, platform) {
@@ -158,6 +222,19 @@ function missingWindow(windowId) {
   };
 }
 
+function missingGroup(groupId) {
+  return {
+    error: {
+      code: -32002,
+      message: `Group ${groupId} is missing`
+    }
+  };
+}
+
+function unsupportedOperation() {
+  return { error: { code: -32003, message: "The browser does not support the operation" } };
+}
+
 function requireTabIds(tabIds, tabs) {
   if (!Array.isArray(tabIds) || tabIds.length === 0) return invalidParameters();
   for (const tabId of tabIds) {
@@ -211,6 +288,26 @@ export async function execute(api, plan, platform) {
         });
         continue;
       }
+      if (step.type === "group") {
+        const groupStep = Object.hasOwn(step, "windowId") && step.windowId === null
+          ? { ...step, windowId: lastNewWindowId }
+          : step;
+        const grouped = await executeGroup(api, groupStep);
+        const result = { index, ok: !grouped.error };
+        if (grouped.groupId !== null) result.groupId = grouped.groupId;
+        if (grouped.error) {
+          result.error = nativeFailure(grouped.error);
+          results.push(result);
+          return { results, failed: true };
+        }
+        results.push(result);
+        continue;
+      }
+      if (step.type === "ungroup") {
+        await api.tabs.ungroup(step.tabIds);
+        results.push({ index, ok: true });
+        continue;
+      }
       if (step.type === "open") {
         const opened = await executeOpen(api, {
           ...step,
@@ -255,6 +352,29 @@ export async function execute(api, plan, platform) {
     }
   }
   return { results, failed: false };
+}
+
+async function executeGroup(api, step) {
+  let groupId = null;
+  try {
+    if (Object.hasOwn(step, "groupId")) {
+      groupId = await api.tabs.group({ tabIds: step.tabIds, groupId: step.groupId });
+    } else {
+      const options = { tabIds: step.tabIds };
+      if (Object.hasOwn(step, "windowId")) {
+        options.createProperties = { windowId: step.windowId };
+      }
+      groupId = await api.tabs.group(options);
+      await api.tabGroups.update(groupId, {
+        title: step.title,
+        color: step.color,
+        collapsed: step.collapsed
+      });
+    }
+    return { groupId, error: null };
+  } catch (error) {
+    return { groupId, error };
+  }
 }
 
 async function executeNewWindow(api, step) {

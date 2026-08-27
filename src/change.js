@@ -38,7 +38,7 @@ export function createChange(api, inventory, platform, actions = { validate, exe
     }
 
     const state = await inventory.get();
-    const validated = actions.validate(state, params.actions, platform);
+    const validated = actions.validate(state, params.actions, platform, api);
     if (validated.error) return { error: validated.error };
 
     const changeId = String(nextId);

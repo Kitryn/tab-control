@@ -2,8 +2,8 @@
 name: tab-control
 description: >
   Reads and changes local Firefox or Chromium tabs through tabctl JSON-RPC.
-  Use when the user asks to list, inspect, close, or rearrange open browser
-  tabs, or to call Tab Control.
+  Use when the user asks to list, inspect, close, group, ungroup, or rearrange
+  open browser tabs, or to call Tab Control.
 ---
 
 # Tab Control
@@ -70,7 +70,7 @@ a result is small enough for manual inspection.
 | Method | Use |
 | --- | --- |
 | `get` | Read compact or full browser state. Both views include `revision`. |
-| `apply` | Run an ordered action list. Implemented actions: `close`, `move`, `open`, `newWindow`. |
+| `apply` | Run an ordered action list. Implemented actions: `close`, `move`, `open`, `newWindow`, `group`, `ungroup`. |
 
 `undo` is in the interface. The extension has no `undo` implementation yet.
 
@@ -89,6 +89,10 @@ a result is small enough for manual inspection.
    were not attempted. Call `get` and make a new plan.
 6. If the response is `-32001`, call `get` again and make a new plan.
 7. If the response is `-32004`, wait, then call `apply` again or call `get`.
+
+Validation checks the starting inventory. The browser controls state changes
+between actions. When a later action depends on the result of an earlier
+action, use `apply`, then `get`, then a new `apply`.
 
 `get` can run at the same time as another `get` on the same instance. A `get`
 that starts during `apply` waits and then returns a complete inventory.
@@ -171,9 +175,50 @@ This successful result identifies a browser move no-op.
 
 `newWindow` creates a standard window and asks the browser to move the listed
 tabs into it. It does not require their source window IDs. Its result contains
-`windowId`. An empty successful browser move is a no-op. Later `move` and
-`open` actions in the same list can use `windowId: null` to target the new
-window. A second `newWindow` changes that binding to the later window.
+`windowId`. An empty successful browser move is a no-op. Later `move`, `open`,
+and create-`group` actions in the same list can use `windowId: null` to target
+the new window. A second `newWindow` changes that binding to the later window.
+
+## `group` and `ungroup`
+
+Create a group with required metadata:
+
+```json
+{
+  "type": "group",
+  "tabIds": [17, 24],
+  "windowId": 1,
+  "title": "Documentation",
+  "color": "blue",
+  "collapsed": false
+}
+```
+
+`windowId` is optional. A numeric value selects a window. `null` selects the
+nearest preceding `newWindow`. Valid colors are `grey`, `blue`, `red`,
+`yellow`, `green`, `pink`, `purple`, `cyan`, and `orange`.
+
+Move tabs into an existing group with a `groupId` from full `get`:
+
+```json
+{ "type": "group", "tabIds": [17, 24], "groupId": 8 }
+```
+
+Do not mix `groupId` with create properties. Grouping can move tabs between
+windows and can unpin them. A successful result contains `groupId`.
+
+Remove tabs from their groups with:
+
+```json
+{ "type": "ungroup", "tabIds": [17, 24] }
+```
+
+A move can change group membership. An action can also remove the last tab and
+delete a group. Use an explicit `group` or `ungroup` action when membership
+matters. Call `get` before a later action uses the changed group state.
+
+Group APIs are not present on some Firefox versions. An unsupported group
+operation returns `-32003`.
 
 ## `open`
 
@@ -204,10 +249,13 @@ lists tabs that were already created. Call `get` before making a new plan.
 | Code | Next step |
 | ---: | --- |
 | `-32001` | Call `get`. The supplied revision is old. |
-| `-32002` | Call `get`. A tab, window, container, or group is gone. |
-| `-32003` | Use an implemented action. |
+| `-32002` | Call `get`. A starting tab, window, container, or group is absent. |
+| `-32003` | The browser does not support the action. Use a different plan. |
 | `-32004` | Wait. Then send the change again. |
 | `-32000` | The browser or the bridge gave no response. |
+
+For `complete: false`, read the `BROWSER_REJECTED` message. Earlier actions
+stay applied. Call `get`, inspect the current state, and make a new plan.
 
 ## Setup
 
