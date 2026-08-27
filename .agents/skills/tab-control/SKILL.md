@@ -140,9 +140,19 @@ report partial close progress. Unimplemented action types get `-32003`.
 }
 ```
 
-`windowId` is a window id from `get`. `index` `-1` means the end of that
-window. After a `newWindow` action, `windowId: null` means the window created
-by the nearest preceding `newWindow` in the same action list. The result has
+`windowId` is a window id from `get`. The extension passes `index` unchanged
+to `tabs.move`. A numeric index is the browser's insertion index during the
+move. The final index of the first moved tab can differ from it. A same-window
+move of several tabs toward a higher index can finish one or more positions
+earlier because the browser moves the tabs in turn.
+
+Use `index: -1` for a valid move to the end. For a full-strip reorder, send one
+`move` with every tab ID in the required order and `index: 0`. After a numeric
+multi-tab move, check `movedCount`, `firstIndex`, and `lastIndex`. If the final
+range differs from the plan, call `get` and make a new plan.
+
+After a `newWindow` action, `windowId: null` means the window created by the
+nearest preceding `newWindow` in the same action list. The result has
 `complete: true` when all actions succeed and `complete: false` when execution
 stops on a failed action. A successful move reports `intendedCount`,
 `movedCount`, `windowId`, `firstIndex`, and `lastIndex`. If `tabs.move` returns

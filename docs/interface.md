@@ -528,10 +528,20 @@ Move tabs to a window and index:
 }
 ```
 
-The extension preserves the order in `tabIds`. An index of `-1` means the end
-of the destination window. Tabs omitted from `tabIds` stay where they are.
+The extension passes `tabIds`, `windowId`, and `index` unchanged to
+`tabs.move`. The browser uses a numeric `index` as its insertion index during
+the move. The final index of the first moved tab can differ from that number.
+For example, a same-window move of `[B, C]` to index `4` in
+`[A, B, C, D, E, F]` can produce `[A, D, E, B, C, F]`; the moved block then
+starts at index `3`. This can occur when several tabs move forward in the same
+window because each tab moves in turn.
 
-This action calls `tabs.move`. Its result contains `intendedCount`,
+An index of `-1` means the end of the destination window. It avoids this index
+shift for a valid move to the end. Tabs omitted from `tabIds` stay where they
+are. The browser controls pinned regions, split views, and other placement
+rules.
+
+The result contains `intendedCount`,
 `movedCount`, `windowId`, `firstIndex`, and `lastIndex`. `intendedCount` is the
 number of tab IDs in the request. `movedCount` is the number of tabs in the
 browser response. `windowId` identifies the destination window. `firstIndex`
@@ -540,8 +550,12 @@ empty array, the call succeeds with `movedCount: 0`, and both indexes are null.
 For example, the browser can return an empty array for a request to move an
 unpinned tab into the pinned region.
 
-There is no whole-window permutation verb. An agent that wants a full strip
-sends one `move` of every tab in that window, or several `move`s.
+Use `movedCount`, `firstIndex`, and `lastIndex` as the final browser result.
+If the result differs from the requested arrangement, call `get` and make a
+new plan.
+
+For a full-strip reorder, send one `move` with every tab ID in the required
+order and `index: 0`. This uses the existing `move` action.
 
 ### 7.2 `update`
 
