@@ -20,8 +20,11 @@ for (const browser of ["firefox", "chromium"]) {
   if (manifest.manifest_version !== 3) {
     throw new Error(`${browser} manifest requires Manifest V3`);
   }
-  if (!manifest.action?.default_popup) {
-    throw new Error(`${browser} manifest requires a dashboard popup`);
+  if (manifest.action?.default_popup || manifest.options_ui?.page !== "settings.html") {
+    throw new Error(`${browser} manifest requires the settings page`);
+  }
+  if (!manifest.action?.default_icon || !manifest.icons) {
+    throw new Error(`${browser} manifest requires extension icons`);
   }
   if (manifest.background?.type !== "module") {
     throw new Error(`${browser} background must be type module`);

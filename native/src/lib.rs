@@ -12,6 +12,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct Identity {
     pub instance_id: String,
     pub browser: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -46,14 +47,27 @@ pub fn discovery_name(browser: &str, instance_id: &str) -> String {
 pub fn parse_identity(value: &Value) -> Option<Identity> {
     let instance_id = value.get("instanceId")?.as_str()?;
     let browser = value.get("browser")?.as_str()?;
+    let name = match value.get("name") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name))
+            if !name.is_empty() && name.trim() == name && name.chars().count() <= 64 =>
+        {
+            Some(name.clone())
+        }
+        _ => return None,
+    };
     if browser.is_empty()
-        || Path::new(instance_id).file_name().and_then(|name| name.to_str()) != Some(instance_id)
+        || Path::new(instance_id)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(instance_id)
     {
         return None;
     }
     Some(Identity {
         instance_id: instance_id.to_string(),
         browser: browser.to_string(),
+        name,
     })
 }
 
@@ -117,10 +131,7 @@ mod tests {
             "945f84ab-1234-4000-8000-000000000001".to_string(),
             "a1b2c3de-5678-4000-8000-000000000002".to_string(),
         ];
-        assert_eq!(
-            resolve_instance_id("945f84", &ids).unwrap(),
-            ids[0]
-        );
+        assert_eq!(resolve_instance_id("945f84", &ids).unwrap(), ids[0]);
         assert_eq!(resolve_instance_id(&ids[1], &ids).unwrap(), ids[1]);
     }
 
@@ -130,7 +141,10 @@ mod tests {
             "91aaaaaa-1234-4000-8000-000000000001".to_string(),
             "91bbbbbb-1234-4000-8000-000000000002".to_string(),
         ];
-        assert_eq!(resolve_instance_id("91", &ids), Err(ResolveError::Ambiguous));
+        assert_eq!(
+            resolve_instance_id("91", &ids),
+            Err(ResolveError::Ambiguous)
+        );
         assert_eq!(resolve_instance_id("zz", &ids), Err(ResolveError::None));
         assert_eq!(resolve_instance_id("", &ids), Err(ResolveError::None));
     }

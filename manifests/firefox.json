@@ -3,6 +3,12 @@
   "name": "Tab Control",
   "version": "0.1.0",
   "description": "Inspect and control browser tabs through an authorized local agent.",
+  "icons": {
+    "16": "icons/tab-control-16.png",
+    "32": "icons/tab-control-32.png",
+    "48": "icons/tab-control-48.png",
+    "128": "icons/tab-control-128.png"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "tab-control@example.invalid",
@@ -15,7 +21,14 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Tab Control",
-    "default_popup": "dashboard.html"
+    "default_title": "Open Tab Control settings",
+    "default_icon": {
+      "16": "icons/tab-control-16.png",
+      "32": "icons/tab-control-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "settings.html",
+    "open_in_tab": true
   }
 }

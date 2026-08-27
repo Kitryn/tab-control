@@ -19,7 +19,7 @@ The client has two commands:
 
 ```sh
 tabctl instances
-tabctl rpc [--instance <instanceId>]
+tabctl rpc [--instance <instanceId> | --name <profileName>]
 ```
 
 `tabctl rpc` reads one JSON-RPC 2.0 request from standard input. It writes one
@@ -44,9 +44,11 @@ the same product, are separate instances. Tab, window, and group IDs and the
 revision counter are scoped to that instance. `get` returns one instance. The
 client does not merge inventories.
 
-The extension creates an instance id with `crypto.randomUUID()`, stores it in
-`storage.local`, and sends `{ "instanceId", "browser" }` to the native host
-before the host listens. Reinstall or a storage wipe creates a new id.
+The extension creates an instance id with `crypto.randomUUID()` and stores it
+in `storage.local`. The user can select the extension toolbar icon to set an
+optional profile name. The extension sends `{ "instanceId", "browser", "name" }`
+to the native host before the host listens. Reinstall or a storage wipe creates
+a new id. A profile-name change restarts the native connection with the same id.
 
 The host binds one Unix socket per instance:
 
@@ -76,7 +78,7 @@ standard output.
 [
   {
     "id": "945f84ab-1234-4000-8000-000000000001",
-    "name": "Firefox 945f84"
+    "name": "work"
   },
   {
     "id": "a1b2c3de-5678-4000-8000-000000000002",
@@ -85,21 +87,26 @@ standard output.
 ]
 ```
 
-`id` is the full instance UUID. That is also the socket file name.
-`name` is the `browser` string from `describe`, a space, then the first six
-characters of `id`.
+`id` is the full instance UUID. That is also the socket file name. `name` is
+the set profile name. If the profile has no set name, it is the `browser`
+string from `describe`, a space, then the first six characters of `id`.
 
 `--instance` accepts the full `id` or a unique prefix of it, like a Docker
-container id. Zero matches or two or more matches: the command fails.
+container id. `--name` accepts an exact set profile name. The two selectors
+are mutually exclusive. Zero matches or two or more matches make the command
+fail. Two live browser profiles can have the same name because each profile
+has separate extension storage.
 
 ### `tabctl rpc`
 
 - `--instance <id>` connects to that instance's socket (full id or unique
   prefix). If it is not live, the command fails.
-- no `--instance` and zero live instances: the command fails
-- no `--instance` and one live instance: the command uses that instance
-- no `--instance` and two or more live instances: the command fails, writes
-  the same array as `tabctl instances` to standard error, and does not guess
+- `--name <name>` connects to the instance with that exact set profile name.
+  If zero or multiple live instances match, the command fails.
+- no selector and zero live instances: the command fails
+- no selector and one live instance: the command uses that instance
+- no selector and two or more live instances: the command fails, writes the
+  same array as `tabctl instances` to standard error, and does not guess
 
 ### `describe`
 
@@ -120,13 +127,15 @@ container id. Zero matches or two or more matches: the command fails.
   "id": 1,
   "result": {
     "instanceId": "945f84ab-1234-4000-8000-000000000001",
-    "browser": "Firefox"
+    "browser": "Firefox",
+    "name": "work"
   }
 }
 ```
 
 `params` must be empty. `instanceId` and `browser` are required. `browser` is
-the product name (`Firefox`, `Chrome`, `Brave`, `Edge`).
+the product name (`Firefox`, `Chrome`, `Brave`, `Edge`). `name` is the set
+profile name, or `null` when the profile has no set name.
 
 `get` never fails because another `get` is in progress.
 
@@ -778,7 +787,7 @@ action calls `windows.remove`.
 
 ## 8. `undo`
 
-`undo` and the dashboard changelog are deferred. The shapes below are the
+`undo` and the planned changelog page are deferred. The shapes below are the
 target, not current behavior.
 
 `undo` restores the supported state from the snapshot for one change. It
@@ -835,7 +844,7 @@ warning explains each partial restoration. For example:
 }
 ```
 
-## 9. Changelog and dashboard
+## 9. Planned changelog page
 
 The extension stores one changelog record with each recovery snapshot:
 
@@ -852,8 +861,9 @@ The extension stores one changelog record with each recovery snapshot:
 }
 ```
 
-The extension dashboard reads these records from extension storage. The public
-RPC interface remains `describe`, `get`, `apply`, and `undo`.
+The extension settings page currently controls the profile name. A later
+changelog page will read these records from extension storage. The public RPC
+interface remains `describe`, `get`, `apply`, and `undo`.
 
 ## 10. Errors
 
@@ -892,7 +902,7 @@ of the browser response.
 | Area | Firefox | Chromium | RPC rule |
 | --- | --- | --- | --- |
 | Background process | Manifest V3 event page. An open native messaging Port keeps it loaded. | Manifest V3 service worker. `connectNative()` keeps it loaded (Chrome 105+). | Hold that Port. Reconnect on disconnect with the same instance id. |
-| Instance id | `storage.local` UUID, per profile. | `storage.local` UUID, per profile. | Socket path and `--instance` use this id. |
+| Instance identity | `storage.local` UUID and optional name, per profile. | `storage.local` UUID and optional name, per profile. | Socket path and `--instance` use the id; `--name` uses an exact set name. |
 | Containers | Supports contextual identities and separate cookie stores. | Uses the standard browser cookie store. | `container` and `containerId` are `null` on Chromium. |
 | Last access | Exposes `Tab.lastAccessed`. | Exposes `Tab.lastAccessed` in current versions. | Return Unix time in milliseconds or `null`. |
 | Opener | Keeps the opener in the same window. | Can clear the opener during non-link navigation. | Return the current `Tab.openerTabId` or `null`; do not restore cleared relationships. |

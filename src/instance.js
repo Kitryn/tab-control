@@ -1,17 +1,35 @@
-const STORAGE_KEY = "instanceId";
+const INSTANCE_ID_KEY = "instanceId";
+const PROFILE_NAME_KEY = "profileName";
+const PROFILE_NAME_MAX_LENGTH = 64;
 
 export async function loadInstance(api) {
   const stored = await readInstanceId(api);
   const instanceId = stored ?? crypto.randomUUID();
   if (stored !== instanceId) {
-    await api.storage.local.set({ [STORAGE_KEY]: instanceId });
+    await api.storage.local.set({ [INSTANCE_ID_KEY]: instanceId });
   }
-  return { instanceId, browser: await browserName(api) };
+  return {
+    instanceId,
+    browser: await browserName(api),
+    name: await readProfileName(api)
+  };
+}
+
+export async function saveProfileName(api, value) {
+  if (typeof value !== "string") {
+    throw new TypeError("Profile name must be text");
+  }
+  const name = value.trim() || null;
+  if (name && name.length > PROFILE_NAME_MAX_LENGTH) {
+    throw new RangeError(`Profile name must not exceed ${PROFILE_NAME_MAX_LENGTH} characters`);
+  }
+  await api.storage.local.set({ [PROFILE_NAME_KEY]: name });
+  return name;
 }
 
 async function readInstanceId(api) {
-  const result = await api.storage.local.get(STORAGE_KEY);
-  const value = result[STORAGE_KEY];
+  const result = await api.storage.local.get(INSTANCE_ID_KEY);
+  const value = result[INSTANCE_ID_KEY];
   if (
     typeof value !== "string"
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)
@@ -19,6 +37,14 @@ async function readInstanceId(api) {
     return undefined;
   }
   return value;
+}
+
+async function readProfileName(api) {
+  const result = await api.storage.local.get(PROFILE_NAME_KEY);
+  const value = result[PROFILE_NAME_KEY];
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return name && name.length <= PROFILE_NAME_MAX_LENGTH ? name : null;
 }
 
 async function browserName(api) {

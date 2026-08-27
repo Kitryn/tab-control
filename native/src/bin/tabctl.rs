@@ -1,6 +1,6 @@
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use tab_control as bridge;
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -17,6 +17,11 @@ fn main() {
     }
 }
 
+enum Selector {
+    Instance(String),
+    Name(String),
+}
+
 fn run() -> Result<()> {
     let mut arguments = std::env::args().skip(1);
     match arguments.next().as_deref() {
@@ -25,34 +30,35 @@ fn run() -> Result<()> {
             Ok(())
         }
         Some("rpc") => {
-            let instance = match arguments.next().as_deref() {
+            let selector = match arguments.next().as_deref() {
                 None => None,
-                Some("--instance") => {
-                    let Some(id) = arguments.next() else {
-                        eprintln!("Usage: tabctl instances | tabctl rpc [--instance <id>]");
-                        process::exit(2);
+                Some(flag @ ("--instance" | "--name")) => {
+                    let Some(value) = arguments.next() else {
+                        usage();
                     };
                     if arguments.next().is_some() {
-                        eprintln!("Usage: tabctl instances | tabctl rpc [--instance <id>]");
-                        process::exit(2);
+                        usage();
                     }
-                    Some(id)
+                    Some(match flag {
+                        "--instance" => Selector::Instance(value),
+                        "--name" => Selector::Name(value),
+                        _ => unreachable!(),
+                    })
                 }
-                _ => {
-                    eprintln!("Usage: tabctl instances | tabctl rpc [--instance <id>]");
-                    process::exit(2);
-                }
+                _ => usage(),
             };
-            rpc(instance)
+            rpc(selector)
         }
-        _ => {
-            eprintln!("Usage: tabctl instances | tabctl rpc [--instance <id>]");
-            process::exit(2);
-        }
+        _ => usage(),
     }
 }
 
-fn rpc(instance: Option<String>) -> Result<()> {
+fn usage() -> ! {
+    eprintln!("Usage: tabctl instances | tabctl rpc [--instance <id> | --name <name>]");
+    process::exit(2);
+}
+
+fn rpc(selector: Option<Selector>) -> Result<()> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
     let input = input.trim();
@@ -70,13 +76,13 @@ fn rpc(instance: Option<String>) -> Result<()> {
     }
 
     let instances = live_instances();
-    let path = match instance.as_deref() {
-        Some(prefix) => {
+    let path = match selector {
+        Some(Selector::Instance(prefix)) => {
             let ids: Vec<String> = instances
                 .iter()
                 .map(|entry| entry.0.instance_id.clone())
                 .collect();
-            match bridge::resolve_instance_id(prefix, &ids) {
+            match bridge::resolve_instance_id(&prefix, &ids) {
                 Ok(id) => instances
                     .into_iter()
                     .find(|(identity, _)| identity.instance_id == id)
@@ -90,11 +96,26 @@ fn rpc(instance: Option<String>) -> Result<()> {
                 }
             }
         }
+        Some(Selector::Name(name)) => {
+            let matches: Vec<_> = instances
+                .iter()
+                .filter(|(identity, _)| identity.name.as_deref() == Some(&name))
+                .cloned()
+                .collect();
+            match matches.len() {
+                0 => bail!("Tab Control profile {name} is not live"),
+                1 => matches.into_iter().next().unwrap().1,
+                _ => {
+                    writeln!(io::stderr(), "{}", instance_list(&matches))?;
+                    bail!("Tab Control profile {name} is ambiguous")
+                }
+            }
+        }
         None if instances.is_empty() => bail!("No Tab Control instance is live"),
         None if instances.len() == 1 => instances.into_iter().next().unwrap().1,
         None => {
             writeln!(io::stderr(), "{}", instance_list(&instances))?;
-            bail!("Pass --instance; more than one Tab Control instance is live")
+            bail!("Pass --instance or --name; more than one Tab Control instance is live")
         }
     };
 
@@ -128,7 +149,9 @@ fn live_instances() -> Vec<(bridge::Identity, PathBuf)> {
     if let Ok(entries) = fs::read_dir(bridge::socket_dir()) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|extension| extension == "sock")
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "sock")
                 && fs::symlink_metadata(&path)
                     .is_ok_and(|metadata| metadata.file_type().is_socket())
             {
@@ -182,9 +205,12 @@ fn instance_list(instances: &[(bridge::Identity, PathBuf)]) -> Value {
         instances
             .iter()
             .map(|(identity, _)| {
+                let name = identity.name.clone().unwrap_or_else(|| {
+                    bridge::discovery_name(&identity.browser, &identity.instance_id)
+                });
                 json!({
                     "id": identity.instance_id,
-                    "name": bridge::discovery_name(&identity.browser, &identity.instance_id)
+                    "name": name
                 })
             })
             .collect(),

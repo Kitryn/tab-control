@@ -29,10 +29,14 @@ test("rpc rejects pretty-printed JSON before it connects", async () => {
 const firefoxId = "945f84ab-1234-4000-8000-000000000001";
 const chromeId = "a1b2c3de-5678-4000-8000-000000000002";
 
-test("instances lists live sockets and rpc accepts a unique prefix", async () => {
+test("instances lists profile names and rpc accepts either selector", async () => {
   const directory = await mkdtemp(join(tmpdir(), "tab-control-test-"));
   const servers = [
-    await listenInstance(directory, { instanceId: firefoxId, browser: "Firefox" }),
+    await listenInstance(directory, {
+      instanceId: firefoxId,
+      browser: "Firefox",
+      name: "work"
+    }),
     await listenInstance(directory, { instanceId: chromeId, browser: "Chrome" })
   ];
 
@@ -40,7 +44,7 @@ test("instances lists live sockets and rpc accepts a unique prefix", async () =>
     const listed = await runTabctl(["instances"], { socketDir: directory });
     assert.equal(listed.code, 0);
     assert.deepEqual(JSON.parse(listed.stdout), [
-      { id: firefoxId, name: "Firefox 945f84" },
+      { id: firefoxId, name: "work" },
       { id: chromeId, name: "Chrome a1b2c3" }
     ]);
 
@@ -50,7 +54,7 @@ test("instances lists live sockets and rpc accepts a unique prefix", async () =>
     });
     assert.equal(many.code, 1);
     assert.deepEqual(JSON.parse(many.stderr.trim().split("\n")[0]), [
-      { id: firefoxId, name: "Firefox 945f84" },
+      { id: firefoxId, name: "work" },
       { id: chromeId, name: "Chrome a1b2c3" }
     ]);
 
@@ -60,6 +64,13 @@ test("instances lists live sockets and rpc accepts a unique prefix", async () =>
     });
     assert.equal(picked.code, 0);
     assert.equal(JSON.parse(picked.stdout).result.instance, firefoxId);
+
+    const pickedByName = await runTabctl(["rpc", "--name", "work"], {
+      socketDir: directory,
+      input: { jsonrpc: "2.0", id: 3, method: "get", params: {} }
+    });
+    assert.equal(pickedByName.code, 0);
+    assert.equal(JSON.parse(pickedByName.stdout).result.instance, firefoxId);
   } finally {
     await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
     await rm(directory, { recursive: true, force: true });
@@ -90,7 +101,54 @@ test("instances keeps a live socket when describe fails", async () => {
   }
 });
 
-test("rpc uses the only live instance without --instance", async () => {
+test("rpc rejects an ambiguous profile name", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "tab-control-test-"));
+  const servers = [
+    await listenInstance(directory, {
+      instanceId: firefoxId,
+      browser: "Firefox",
+      name: "work"
+    }),
+    await listenInstance(directory, {
+      instanceId: chromeId,
+      browser: "Chrome",
+      name: "work"
+    })
+  ];
+
+  try {
+    const result = await runTabctl(["rpc", "--name", "work"], {
+      socketDir: directory,
+      input: { jsonrpc: "2.0", id: 4, method: "get", params: {} }
+    });
+    assert.equal(result.code, 1);
+    assert.deepEqual(JSON.parse(result.stderr.trim().split("\n")[0]), [
+      { id: firefoxId, name: "work" },
+      { id: chromeId, name: "work" }
+    ]);
+    assert.match(result.stderr, /profile work is ambiguous/);
+  } finally {
+    await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("rpc rejects two selectors", async () => {
+  const result = await runTabctl([
+    "rpc",
+    "--instance",
+    firefoxId,
+    "--name",
+    "work"
+  ], {
+    input: { jsonrpc: "2.0", id: 5, method: "get", params: {} }
+  });
+
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /^Usage:/);
+});
+
+test("rpc uses the only live instance without a selector", async () => {
   const directory = await mkdtemp(join(tmpdir(), "tab-control-test-"));
   const server = await listenInstance(directory, {
     instanceId: firefoxId,
@@ -120,7 +178,11 @@ function listenInstance(directory, identity) {
         socket.end(`${JSON.stringify({
           jsonrpc: "2.0",
           id: request.id,
-          result: { instanceId: identity.instanceId, browser: identity.browser }
+          result: {
+            instanceId: identity.instanceId,
+            browser: identity.browser,
+            name: identity.name
+          }
         })}\n`);
         return;
       }

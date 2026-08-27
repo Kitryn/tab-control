@@ -172,17 +172,29 @@ test("negative successor IDs use null", async () => {
   assert.equal(result.windows[0].tabs[0].successorTabId, null);
 });
 
-test("request handler accepts get and apply close", async () => {
+test("profile changes keep only one tracked native port during startup", async () => {
   const api = mockApi();
   const ports = [];
+  const stored = {
+    instanceId: "945f84ab-1234-4000-8000-000000000001",
+    profileName: null
+  };
+  let releaseInitialRead;
+  const initialRead = new Promise((resolve) => { releaseInitialRead = resolve; });
+  let delayRead = true;
+
   api.runtime = {
     onInstalled: event(),
+    openOptionsPage: async () => {},
     getBrowserInfo: async () => ({ name: "Firefox" }),
     connectNative: () => {
       const port = {
+        disconnected: false,
+        identity: null,
         onMessage: event(),
         onDisconnect: event(),
-        postMessage() {}
+        postMessage(message) { this.identity = message; },
+        disconnect() { this.disconnected = true; }
       };
       ports.push(port);
       return port;
@@ -190,15 +202,82 @@ test("request handler accepts get and apply close", async () => {
     lastError: null
   };
   api.storage = {
+    onChanged: event(),
+    local: {
+      get: async (key) => {
+        if (key === "instanceId" && delayRead) {
+          delayRead = false;
+          await initialRead;
+        }
+        return key in stored ? { [key]: stored[key] } : {};
+      },
+      set: async (values) => Object.assign(stored, values)
+    }
+  };
+  api.action = { onClicked: event() };
+  api.extension.isAllowedIncognitoAccess = (callback) => callback(true);
+  globalThis.chrome = api;
+
+  await import("../src/background.js?startup-race");
+  stored.profileName = "work";
+  api.storage.onChanged.emit({ profileName: { oldValue: null, newValue: "work" } }, "local");
+  releaseInitialRead();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  assert.equal(ports.filter((port) => !port.disconnected).length, 1);
+  assert.equal(ports.find((port) => !port.disconnected).identity.name, "work");
+
+  stored.profileName = "personal";
+  api.storage.onChanged.emit({
+    profileName: { oldValue: "work", newValue: "personal" }
+  }, "local");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const active = ports.filter((port) => !port.disconnected);
+  assert.equal(active.length, 1);
+  assert.equal(active[0].identity.name, "personal");
+  assert.ok(ports.filter((port) => port !== active[0]).every((port) => port.disconnected));
+
+  active[0].disconnected = true;
+  api.runtime.lastError = { message: "No such native application com.tab_control.bridge" };
+  active[0].onDisconnect.emit();
+  delete globalThis.chrome;
+});
+
+test("request handler accepts get and apply close", async () => {
+  const api = mockApi();
+  const ports = [];
+  let optionsOpened = 0;
+  api.runtime = {
+    onInstalled: event(),
+    openOptionsPage: async () => { optionsOpened += 1; },
+    getBrowserInfo: async () => ({ name: "Firefox" }),
+    connectNative: () => {
+      const port = {
+        onMessage: event(),
+        onDisconnect: event(),
+        postMessage() {},
+        disconnect() {}
+      };
+      ports.push(port);
+      return port;
+    },
+    lastError: null
+  };
+  api.storage = {
+    onChanged: event(),
     local: {
       get: async () => ({ instanceId: "945f84ab-1234-4000-8000-000000000001" }),
       set: async () => {}
     }
   };
+  api.action = { onClicked: event() };
   api.extension.isAllowedIncognitoAccess = (callback) => callback(true);
   globalThis.chrome = api;
   const { handleRequest } = await import("../src/background.js");
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  api.action.onClicked.emit();
+  assert.equal(optionsOpened, 1);
 
   api.runtime.lastError = { message: "No such native application com.tab_control.bridge" };
   ports[0].onDisconnect.emit();

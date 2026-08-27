@@ -29,15 +29,15 @@ The CLI is a JSON-RPC transport shim:
 ```sh
 tabctl instances
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{}}' \
-  | dist/tabctl rpc
+  | dist/tabctl rpc --name work
 ```
 
 The host binds `/run/user/<uid>/tab-control/<instanceId>.sock` when that
 runtime directory exists and is owned by the current user, or
-`/tmp/tab-control-<uid>/<instanceId>.sock`. `tabctl instances` lists live
-instances. `tabctl rpc` uses the only live instance, or `--instance <id>`
-when more than one is live. See [docs/interface.md](docs/interface.md)
-section 2.
+`/tmp/tab-control-<uid>/<instanceId>.sock`. Select the extension toolbar icon
+to set a profile name. `tabctl instances` lists live instances. `tabctl rpc`
+uses the only live instance, or accepts `--instance <id>` or `--name <name>`
+to select one. See [docs/interface.md](docs/interface.md) section 2.
 
 Firefox and Chromium start `dist/native-host` through Native Messaging. The
 checked-in host manifests are templates. `npm run install-host` writes them

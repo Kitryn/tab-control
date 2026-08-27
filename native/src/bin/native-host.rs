@@ -1,6 +1,6 @@
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use tab_control as bridge;
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
 
 use std::collections::HashMap;
 use std::fs;
@@ -38,7 +38,8 @@ fn run() -> Result<()> {
     let Some(message) = read_native_message(&mut input)? else {
         bail!("Tab Control identity is missing");
     };
-    let value: Value = serde_json::from_slice(&message).context("Tab Control identity is invalid")?;
+    let value: Value =
+        serde_json::from_slice(&message).context("Tab Control identity is invalid")?;
     let Some(identity) = bridge::parse_identity(&value) else {
         bail!("Tab Control identity is invalid");
     };
@@ -154,7 +155,8 @@ fn dispatch(
             "id": original_id,
             "result": {
                 "instanceId": identity.instance_id,
-                "browser": identity.browser
+                "browser": identity.browser,
+                "name": identity.name
             }
         })
         .to_string()

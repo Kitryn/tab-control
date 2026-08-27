@@ -10,7 +10,8 @@ await buildNativeBins();
 
 const identity = {
   instanceId: "945f84ab-1234-4000-8000-000000000001",
-  browser: "Firefox"
+  browser: "Firefox",
+  name: "work"
 };
 
 test("native host relays a CLI request and native response", async () => {
@@ -184,7 +185,8 @@ test("native host answers describe without a native round trip", async () => {
       id: 1,
       result: {
         instanceId: identity.instanceId,
-        browser: "Firefox"
+        browser: "Firefox",
+        name: "work"
       }
     });
   } finally {

@@ -8,7 +8,9 @@ const inventory = createInventory(extensionApi);
 const change = createChange(extensionApi, inventory, platform);
 
 let instance = null;
+let bridgePort = null;
 let reconnectTimer = 0;
+let identityReload = Promise.resolve();
 
 export async function handleRequest(request) {
   if (!request || request.jsonrpc !== "2.0") {
@@ -67,12 +69,16 @@ function errorResponse(id, code, message, data) {
 }
 
 function connectBridge() {
+  if (bridgePort || !instance) return;
   const started = Date.now();
   const port = extensionApi.runtime.connectNative("com.tab_control.bridge");
+  bridgePort = port;
   port.onMessage.addListener(async (request) => {
     port.postMessage(await handleRequest(request));
   });
   port.onDisconnect.addListener(() => {
+    if (bridgePort !== port) return;
+    bridgePort = null;
     const message = extensionApi.runtime.lastError?.message
       ?? "Tab Control native bridge disconnected";
     console.error(message);
@@ -83,18 +89,39 @@ function connectBridge() {
     ) {
       return;
     }
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectBridge, Math.max(0, 1000 - (Date.now() - started)));
+    scheduleBridgeConnection(Math.max(0, 1000 - (Date.now() - started)));
   });
-  port.postMessage({
-    instanceId: instance.instanceId,
-    browser: instance.browser
-  });
+  port.postMessage(instance);
 }
 
-loadInstance(extensionApi).then((loaded) => {
-  instance = loaded;
-  connectBridge();
+function scheduleBridgeConnection(delay) {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connectBridge, delay);
+}
+
+function reloadBridgeIdentity(delay = 250) {
+  identityReload = identityReload
+    .then(async () => {
+      instance = await loadInstance(extensionApi);
+      const previousPort = bridgePort;
+      bridgePort = null;
+      previousPort?.disconnect();
+      scheduleBridgeConnection(delay);
+    })
+    .catch((error) => console.error(error));
+  return identityReload;
+}
+
+reloadBridgeIdentity(0);
+
+extensionApi.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && Object.hasOwn(changes, "profileName")) {
+    reloadBridgeIdentity();
+  }
+});
+
+extensionApi.action.onClicked.addListener(() => {
+  extensionApi.runtime.openOptionsPage();
 });
 
 extensionApi.runtime.onInstalled.addListener(() => {

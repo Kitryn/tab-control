@@ -1,0 +1,164 @@
+:root {
+  color-scheme: light dark;
+  font: 15px system-ui, sans-serif;
+  --accent: #476ff2;
+  --border: #cbd5e1;
+  --muted: #64748b;
+  --panel: #ffffff;
+  --page: #f1f5f9;
+  --text: #0f172a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+}
+
+main {
+  width: min(640px, calc(100% - 32px));
+  margin: 48px auto;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+header img {
+  flex: none;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+}
+
+header p,
+.help {
+  margin: 0;
+  color: var(--muted);
+}
+
+form {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgb(15 23 42 / 8%);
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 650;
+}
+
+input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+input:focus {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.help {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.help code,
+.instance code {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--page);
+}
+
+.instance {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 28px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.instance code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+  margin-top: 24px;
+}
+
+#status {
+  color: var(--muted);
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 20px;
+  background: var(--accent);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --border: #334155;
+    --muted: #94a3b8;
+    --panel: #111827;
+    --page: #020617;
+    --text: #e2e8f0;
+  }
+}
+
+@media (max-width: 520px) {
+  main {
+    margin: 24px auto;
+  }
+
+  form {
+    padding: 20px;
+  }
+
+  .instance {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

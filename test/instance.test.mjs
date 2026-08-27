@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadInstance } from "../src/instance.js";
+import { loadInstance, saveProfileName } from "../src/instance.js";
 
 test("loadInstance reuses storage.local and mints once", async () => {
   const stored = {};
@@ -20,6 +20,7 @@ test("loadInstance reuses storage.local and mints once", async () => {
   const second = await loadInstance(api);
 
   assert.equal(first.browser, "Firefox");
+  assert.equal(first.name, null);
   assert.equal(first.instanceId, second.instanceId);
   assert.match(
     first.instanceId,
@@ -33,9 +34,27 @@ test("loadInstance reuses storage.local and mints once", async () => {
   assert.equal(stored.instanceId, reminted.instanceId);
 });
 
+test("profile name is trimmed, stored, and can be cleared", async () => {
+  const { api, stored } = storageApi();
+
+  assert.equal(await saveProfileName(api, "  work  "), "work");
+  assert.equal((await loadInstance(api)).name, "work");
+  assert.equal(stored.profileName, "work");
+
+  assert.equal(await saveProfileName(api, "   "), null);
+  assert.equal((await loadInstance(api)).name, null);
+  assert.equal(stored.profileName, null);
+
+  await assert.rejects(
+    saveProfileName(api, "x".repeat(65)),
+    /must not exceed 64 characters/
+  );
+});
+
 function storageApi() {
   const stored = {};
   return {
+    stored,
     api: {
       storage: {
         local: {

@@ -3,6 +3,12 @@
   "name": "Tab Control",
   "version": "0.1.0",
   "description": "Inspect and control browser tabs through an authorized local agent.",
+  "icons": {
+    "16": "icons/tab-control-16.png",
+    "32": "icons/tab-control-32.png",
+    "48": "icons/tab-control-48.png",
+    "128": "icons/tab-control-128.png"
+  },
   "permissions": ["storage", "tabs", "tabGroups", "nativeMessaging"],
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5V6w5GvYKHQWsSBfHAZ9xnvE+OUpwxh8szyHwNwheN4OpFf8yWdNGFsfSnPPWA74pUORbVHKq6lPViz26+SUuwGzXL0AbC/fSMP4Mn1zmNd14YCklvTF2+IYBPkRMB7LgNM79N9cidmwyF/rkCrl+M869PJ5sEP4meze+bLdPPfkInPKJUPVXbCOcF6XZ+CfYZXOQq3DCFQvZ+yVADw2djdEaUKPW9xG8tonG2P3Op/b7kRGtiL7p18+SKW6DEUmD0fY6FAecUXJ1ri903KCUWhPFZ3Y5kAUSf39Pqq4ItVeYeR4CJNFGzNiLyoOdMtoF8uhA/M0DFSnyKuwPMSZrQIDAQAB",
   "background": {
@@ -10,7 +16,14 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Tab Control",
-    "default_popup": "dashboard.html"
+    "default_title": "Open Tab Control settings",
+    "default_icon": {
+      "16": "icons/tab-control-16.png",
+      "32": "icons/tab-control-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "settings.html",
+    "open_in_tab": true
   }
 }
