@@ -373,8 +373,9 @@ includes `index` and `ok`. Actions after the first failed action are not
 attempted and are not included.
 
 When the browser API returns tab or window objects, the result includes those
-ids and positions so the agent can see what actually happened. A native no-op
-is `ok: true` with an empty moved-tab list, not a validation error. The
+ids and positions so the agent can see what actually happened. A successful
+`close` result includes `closedTabIds` in request order and `closedCount`. A
+native no-op is `ok: true` with an empty moved-tab list, not a validation error. The
 extension does not rewrite browser-specific `tabs.move` behavior (pinned
 regions, split views). Those follow the current browser. Ambiguous cases belong
 in the agent skill as a pointer to MDN or Chrome docs, not as extra RPC rules.
@@ -644,8 +645,21 @@ Close tabs:
 ```
 
 Closed tabs are gone. There is no automatic restore. The action calls
-`tabs.remove`. The action calls
-`tabs.remove`.
+`tabs.remove`. After that call succeeds, the result contains `closedTabIds` in
+request order and `closedCount`:
+
+```json
+{
+  "index": 0,
+  "ok": true,
+  "closedTabIds": [17, 24],
+  "closedCount": 2
+}
+```
+
+If `tabs.remove` rejects, the failed result does not contain either close-detail
+field because the browser does not report partial progress. The agent must call
+`get` to inspect the current state.
 
 ### 7.7 `newWindow`
 

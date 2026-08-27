@@ -192,8 +192,38 @@ test("failed newWindow reports a window that was already created and stops", asy
   assert.deepEqual(api.tabs.removed, []);
 });
 
-test("apply closes tabs when the revision matches", async () => {
+test("apply closes tabs and reports their IDs in order", async () => {
   const api = mockApi();
+  api.windows.value[0].tabs.push({
+    ...api.windows.value[0].tabs[0],
+    id: 8,
+    index: 1
+  });
+  const change = createChange(api, createInventory(api), chromiumPlatform);
+  const end = change.begin();
+  const outcome = await change.apply({
+    revision: 1,
+    description: "Close the example tabs",
+    actions: [{ type: "close", tabIds: [8, 7] }]
+  });
+  end();
+
+  assert.equal(outcome.result.changeId, "1");
+  assert.equal(outcome.result.complete, true);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: true,
+    closedTabIds: [8, 7],
+    closedCount: 2
+  }]);
+  assert.deepEqual(api.tabs.removed, [8, 7]);
+});
+
+test("a rejected close does not report closed tabs", async () => {
+  const api = mockApi();
+  api.tabs.remove = async () => {
+    throw new Error("Tab removal failed");
+  };
   const change = createChange(api, createInventory(api), chromiumPlatform);
   const end = change.begin();
   const outcome = await change.apply({
@@ -203,10 +233,12 @@ test("apply closes tabs when the revision matches", async () => {
   });
   end();
 
-  assert.equal(outcome.result.changeId, "1");
-  assert.equal(outcome.result.complete, true);
-  assert.deepEqual(outcome.result.actions, [{ index: 0, ok: true }]);
-  assert.deepEqual(api.tabs.removed, [7]);
+  assert.equal(outcome.result.complete, false);
+  assert.deepEqual(outcome.result.actions, [{
+    index: 0,
+    ok: false,
+    error: { code: "BROWSER_REJECTED", message: "Tab removal failed" }
+  }]);
 });
 
 test("apply moves tabs and reports the API positions", async () => {

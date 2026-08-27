@@ -78,7 +78,9 @@ restarts. After a restart, call `get` again.
 ```
 
 Put only the tab IDs that the user named, or that the plan selected, in
-`tabIds`. Unimplemented action types get `-32003`.
+`tabIds`. A successful result includes `closedTabIds` in request order and
+`closedCount`. A failed result omits both fields because the browser does not
+report partial close progress. Unimplemented action types get `-32003`.
 
 ## `move`
 

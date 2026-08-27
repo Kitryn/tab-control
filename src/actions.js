@@ -217,8 +217,14 @@ export async function execute(api, plan, platform) {
         continue;
       }
       if (step.type === "close") {
-        await api.tabs.remove(step.tabIds);
-        results.push({ index, ok: true });
+        const closedTabIds = [...step.tabIds];
+        await api.tabs.remove(closedTabIds);
+        results.push({
+          index,
+          ok: true,
+          closedTabIds,
+          closedCount: closedTabIds.length
+        });
         continue;
       }
       results.push({
