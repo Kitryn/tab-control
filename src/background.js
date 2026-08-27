@@ -16,12 +16,11 @@ export async function handleRequest(request) {
   }
 
   if (request.method === "get") {
-    if (request.params && Object.keys(request.params).length > 0) {
-      return errorResponse(request.id, -32602, "Invalid parameters");
-    }
+    const view = getView(request.params);
+    if (!view) return errorResponse(request.id, -32602, "Invalid parameters");
     await change.idle();
     try {
-      return { jsonrpc: "2.0", id: request.id, result: await inventory.get() };
+      return { jsonrpc: "2.0", id: request.id, result: await inventory.get(view) };
     } catch (error) {
       return errorResponse(request.id, -32603, error?.message ?? "Internal error");
     }
@@ -51,6 +50,14 @@ export async function handleRequest(request) {
   }
 
   return errorResponse(request.id ?? null, -32601, "Unknown method");
+}
+
+function getView(params) {
+  if (params === undefined || params === null) return "full";
+  if (typeof params !== "object" || Array.isArray(params)) return null;
+  if (Object.keys(params).some((key) => key !== "view")) return null;
+  if (params.view === undefined || params.view === "full") return "full";
+  return params.view === "compact" ? "compact" : null;
 }
 
 function errorResponse(id, code, message, data) {

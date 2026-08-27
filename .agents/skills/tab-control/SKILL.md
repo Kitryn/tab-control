@@ -17,7 +17,7 @@ Full message shapes are in [docs/interface.md](../../../docs/interface.md).
 
 ```sh
 tabctl instances
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{}}' \
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{"view":"compact"}}' \
   | tabctl rpc --instance 945f84
 ```
 
@@ -30,11 +30,46 @@ One JSON-RPC 2.0 object on one line to `tabctl rpc` on standard input. One
 JSON-RPC object on standard output. Pretty-printed JSON is rejected. Each
 process call is one request.
 
+## Read inventory
+
+Use compact `get` by default. It returns `revision`, inventory-coverage
+metadata, window IDs, and each tab's `id`, `index`, `title`, and `url`. This is
+usually sufficient for discovery, classification, counting, closing, and
+summaries.
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{"view":"compact"}}' \
+  | tabctl rpc --instance 945f84
+```
+
+Request the full inventory only when the plan needs window state, pinned or
+active state, containers, groups, audio state, pending-open state, access time,
+or tab relationships:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{}}' \
+  | tabctl rpc --instance 945f84
+```
+
+Even compact output can be large when tabs have long URLs. Filter it before it
+enters the agent context. Keep `revision` with the selected tabs:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get","params":{"view":"compact"}}' \
+  | tabctl rpc --instance 945f84 \
+  | jq -c '{revision:.result.revision,tabs:[.result.windows[].tabs[]
+      | select((.url // "") | test("grafana|thanos"; "i"))
+      | {id,index,title,url}]}'
+```
+
+Use `jq -c` so its result stays on one line. Pretty output is useful only after
+a result is small enough for manual inspection.
+
 ## Methods that work now
 
 | Method | Use |
 | --- | --- |
-| `get` | Read all windows, tabs, containers, and groups. The result includes `revision`. |
+| `get` | Read compact or full browser state. Both views include `revision`. |
 | `apply` | Run an ordered action list. Implemented actions: `close`, `move`, `open`, `newWindow`. |
 
 `undo` is in the interface. The extension has no `undo` implementation yet.
@@ -44,7 +79,8 @@ process call is one request.
 1. Call `tabctl instances`. If more than one instance, pick one and pass a
    short unique `--instance` prefix on every `tabctl rpc`. Do not merge
    inventories. IDs from one instance are invalid on another.
-2. Call `get` on that instance.
+2. Call compact `get` on that instance. Call full `get` instead when the plan
+   needs fields that compact omits.
 3. Decide the change from the inventory. Keep the `revision`.
 4. Call `apply` with that `revision`, a `description` that tells the user
    why, and one or more actions.

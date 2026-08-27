@@ -28,12 +28,22 @@ export function createInventory(api, now = Date.now) {
   listen(api.tabGroups?.onRemoved);
   listen(api.tabGroups?.onUpdated);
 
-  async function get() {
+  async function get(view = "full") {
     const capturedRevision = revision;
     const [windows, privateWindowsIncluded] = await Promise.all([
       api.windows.getAll({ populate: true }),
       getPrivateWindowAccess(api)
     ]);
+
+    if (view === "compact") {
+      return {
+        revision: capturedRevision,
+        capturedAt: now(),
+        privateWindowsIncluded,
+        windows: windows.map(normalizeCompactWindow)
+      };
+    }
+
     const containers = await getContainers(api);
     const groups = await getGroups(api);
 
@@ -50,6 +60,23 @@ export function createInventory(api, now = Date.now) {
   return { get, markChanged, currentRevision: () => revision };
 }
 
+function normalizeCompactWindow(window) {
+  return {
+    id: valueOrNull(window.id),
+    tabs: (window.tabs ?? []).map(normalizeCompactTab)
+  };
+}
+
+function normalizeCompactTab(tab) {
+  const identity = normalizeTabIdentity(tab);
+  return {
+    id: identity.id,
+    index: identity.index,
+    title: identity.title,
+    url: identity.url
+  };
+}
+
 function normalizeWindow(window, containers) {
   return {
     id: valueOrNull(window.id),
@@ -62,22 +89,22 @@ function normalizeWindow(window, containers) {
 }
 
 function normalizeTab(tab, containers) {
+  const identity = normalizeTabIdentity(tab);
   const muted = tab.mutedInfo?.muted;
   const container = tab.cookieStoreId && containers.has(tab.cookieStoreId)
     ? containers.get(tab.cookieStoreId)
     : null;
-  const pendingOpen = decodePendingOpen(tab.url) ?? decodePendingOpen(tab.pendingUrl);
 
   return {
-    id: valueOrNull(tab.id),
-    index: valueOrNull(tab.index),
-    url: pendingOpen?.url ?? valueOrNull(tab.url),
-    pendingUrl: pendingOpen ? null : valueOrNull(tab.pendingUrl),
-    title: pendingOpen?.title ?? valueOrNull(tab.title),
+    id: identity.id,
+    index: identity.index,
+    url: identity.url,
+    pendingUrl: identity.pendingOpen ? null : valueOrNull(tab.pendingUrl),
+    title: identity.title,
     active: booleanOrNull(tab.active),
     pinned: booleanOrNull(tab.pinned),
     discarded: booleanOrNull(tab.discarded),
-    pendingOpen: Boolean(pendingOpen),
+    pendingOpen: Boolean(identity.pendingOpen),
     hidden: booleanOrNull(tab.hidden),
     audible: booleanOrNull(tab.audible),
     muted: booleanOrNull(muted),
@@ -86,6 +113,17 @@ function normalizeTab(tab, containers) {
     groupId: validGroupId(tab.groupId),
     openerTabId: valueOrNull(tab.openerTabId),
     successorTabId: validTabId(tab.successorTabId)
+  };
+}
+
+function normalizeTabIdentity(tab) {
+  const pendingOpen = decodePendingOpen(tab.url) ?? decodePendingOpen(tab.pendingUrl);
+  return {
+    id: valueOrNull(tab.id),
+    index: valueOrNull(tab.index),
+    title: pendingOpen?.title ?? valueOrNull(tab.title),
+    url: pendingOpen?.url ?? valueOrNull(tab.url),
+    pendingOpen
   };
 }
 

@@ -205,6 +205,9 @@ extension can access.
 
 ### Request
 
+An empty `params` object returns the full inventory. `view: "full"` is
+equivalent.
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -214,7 +217,21 @@ extension can access.
 }
 ```
 
-### Result
+Use `view: "compact"` for discovery, classification, counting, and close
+plans that need only tab identity and position:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "get",
+  "params": { "view": "compact" }
+}
+```
+
+No other `view` or parameter is valid.
+
+### Full result
 
 ```json
 {
@@ -267,6 +284,43 @@ extension can access.
   }
 }
 ```
+
+### Compact result
+
+The compact result keeps the revision and inventory-coverage metadata. Each
+window contains only its ID and tabs. Each tab contains `id`, `index`, `title`,
+and `url`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "revision": 42,
+    "capturedAt": 1787550000000,
+    "privateWindowsIncluded": true,
+    "windows": [
+      {
+        "id": 1,
+        "tabs": [
+          {
+            "id": 17,
+            "index": 0,
+            "title": "Example",
+            "url": "https://example.com/"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Compact `url` and `title` use the same pending-open normalization as the full
+result. Compact `get` does not query containers or groups. Use the full result
+before a plan depends on window state, pinned or active state, containers,
+groups, audio state, pending-open state, access time, or tab relationships.
+Both views use the same revision counter.
 
 `capturedAt` and `lastAccessed` are Unix times in milliseconds.
 

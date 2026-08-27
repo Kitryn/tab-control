@@ -36,6 +36,49 @@ test("get returns normalized browser state", async () => {
   delete globalThis.browser;
 });
 
+test("compact get returns only fields used for discovery", async () => {
+  const api = mockApi();
+  api.contextualIdentities.query = async () => {
+    throw new Error("Compact get must not query containers");
+  };
+  api.tabGroups.query = async () => {
+    throw new Error("Compact get must not query groups");
+  };
+
+  const result = await createInventory(api, () => 1234).get("compact");
+
+  assert.deepEqual(result, {
+    revision: 1,
+    capturedAt: 1234,
+    privateWindowsIncluded: true,
+    windows: [{
+      id: 1,
+      tabs: [{
+        id: 7,
+        index: 0,
+        title: "Example",
+        url: "https://example.com/"
+      }]
+    }]
+  });
+});
+
+test("compact get normalizes pending tab targets", async () => {
+  const api = mockApi();
+  const tab = api.windows.value[0].tabs[0];
+  tab.url = encodePendingOpen("https://example.com/later", "Read later");
+  tab.title = "data page";
+
+  const result = await createInventory(api).get("compact");
+
+  assert.deepEqual(result.windows[0].tabs[0], {
+    id: 7,
+    index: 0,
+    title: "Read later",
+    url: "https://example.com/later"
+  });
+});
+
 test("revision changes after a browser event", async () => {
   const api = mockApi();
   globalThis.browser = api;
@@ -147,15 +190,33 @@ test("request handler accepts get and apply close", async () => {
     method: "get",
     params: {}
   });
-  const failure = await handleRequest({
+  const explicitFull = await handleRequest({
     jsonrpc: "2.0",
     id: 10,
+    method: "get",
+    params: { view: "full" }
+  });
+  const compact = await handleRequest({
+    jsonrpc: "2.0",
+    id: 11,
+    method: "get",
+    params: { view: "compact" }
+  });
+  const invalidView = await handleRequest({
+    jsonrpc: "2.0",
+    id: 12,
+    method: "get",
+    params: { view: "brief" }
+  });
+  const failure = await handleRequest({
+    jsonrpc: "2.0",
+    id: 13,
     method: "nope",
     params: {}
   });
   const applied = await handleRequest({
     jsonrpc: "2.0",
-    id: 11,
+    id: 14,
     method: "apply",
     params: {
       revision: 1,
@@ -166,6 +227,23 @@ test("request handler accepts get and apply close", async () => {
 
   assert.equal(success.id, 9);
   assert.equal(success.result.windows[0].id, 1);
+  assert.deepEqual(explicitFull.result.containers, [{
+    id: "firefox-container-1",
+    name: "Work"
+  }]);
+  assert.deepEqual(explicitFull.result.groups, [{
+    id: 3,
+    windowId: 1,
+    title: "Docs",
+    color: "blue",
+    collapsed: false
+  }]);
+  assert.deepEqual(compact.result.windows[0], {
+    id: 1,
+    tabs: [{ id: 7, index: 0, title: "Example", url: "https://example.com/" }]
+  });
+  assert.equal(compact.result.containers, undefined);
+  assert.equal(invalidView.error.code, -32602);
   assert.equal(failure.error.code, -32601);
   assert.equal(applied.result.changeId, "1");
   assert.equal(applied.result.complete, true);
