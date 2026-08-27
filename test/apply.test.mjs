@@ -595,7 +595,7 @@ test("apply rejects a stale revision", async () => {
   const api = mockApi();
   const inventory = createInventory(api);
   const change = createChange(api, inventory, chromiumPlatform);
-  api.tabs.onUpdated.emit();
+  api.tabs.onMoved.emit();
   const end = change.begin();
   const outcome = await change.apply({
     revision: 1,

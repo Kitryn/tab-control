@@ -361,8 +361,12 @@ A group has this form:
 }
 ```
 
-The revision changes when the inventory changes. An agent uses the revision to
-prevent a change from using stale IDs or positions.
+The revision counter tracks changes that can make tab IDs, window IDs, tab
+URLs, or tab positions stale. The extension increments it for tab and window
+creation, removal, replacement, or movement; tab-group movement; and tab URL,
+pinned-state, or group changes. Title, loading, audio, discard, activation,
+highlighting, focus, and tab-group metadata events are outside revision
+tracking.
 
 Concurrent `get` requests succeed independently. A `get` that arrives
 while `apply` or `undo` is running waits for that change to finish.
@@ -372,8 +376,8 @@ while `apply` or `undo` is running waits for that change to finish.
 `apply` runs this pipeline. Occupancy is one in-flight change. A second
 `apply` or `undo` fails immediately with `-32004`.
 
-1. Compare `params.revision` to the in-memory event-generation counter. If
-   they differ, fail with `-32001`. This check does not make `apply` atomic.
+1. Compare `params.revision` to the in-memory revision counter. If they differ,
+   fail with `-32001`. This check does not make `apply` atomic.
 2. Fetch a fresh inventory (`windows.getAll({ populate: true })`, groups,
    containers, private-window access). Use that snapshot to validate.
 3. Validate the complete action list against the state that earlier actions
@@ -383,7 +387,7 @@ while `apply` or `undo` is running waits for that change to finish.
    failed native call ends forward execution. Earlier actions stay applied.
    There is no rollback.
 
-The result `revision` is the event-generation counter after execution.
+The result `revision` is the revision counter after execution.
 Recovery snapshots, automatic rollback, and change records are deferred
 until undo work.
 

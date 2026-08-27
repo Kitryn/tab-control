@@ -79,15 +79,36 @@ test("compact get normalizes pending tab targets", async () => {
   });
 });
 
-test("revision changes after a browser event", async () => {
+test("revision changes after a structural browser event", async () => {
   const api = mockApi();
-  globalThis.browser = api;
   const inventory = createInventory(api);
 
   assert.equal((await inventory.get()).revision, 1);
-  api.tabs.onUpdated.emit();
+  api.tabs.onMoved.emit();
   assert.equal((await inventory.get()).revision, 2);
-  delete globalThis.browser;
+});
+
+test("title, loading, activation, highlighting, and focus stay outside revision tracking", async () => {
+  const api = mockApi();
+  const inventory = createInventory(api);
+
+  api.tabs.onUpdated.emit(7, { title: "New title", status: "complete" });
+  api.tabs.onActivated.emit({ tabId: 7, windowId: 1 });
+  api.tabs.onHighlighted.emit({ tabIds: [7], windowId: 1 });
+  api.windows.onFocusChanged.emit(1);
+
+  assert.equal((await inventory.get()).revision, 1);
+});
+
+test("URL, pinned-state, and group changes increment the revision", async () => {
+  const api = mockApi();
+  const inventory = createInventory(api);
+
+  api.tabs.onUpdated.emit(7, { url: "https://example.com/next" });
+  api.tabs.onUpdated.emit(7, { pinned: true });
+  api.tabs.onUpdated.emit(7, { groupId: 4 });
+
+  assert.equal((await inventory.get()).revision, 4);
 });
 
 test("omitted browser fields use null", async () => {
@@ -263,8 +284,8 @@ function event() {
     addListener(listener) {
       listeners.push(listener);
     },
-    emit() {
-      for (const listener of listeners) listener();
+    emit(...args) {
+      for (const listener of listeners) listener(...args);
     }
   };
 }
